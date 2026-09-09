@@ -62,6 +62,10 @@ Experiments will evaluate both policies under:
 - High request load
 - Bursty request load
 
+### Controlled Setup
+
+To isolate the effect of the batching policy, all experiments will use the same model, GPU, runtime configuration, and input processing pipeline. The primary experimental variable will be the batching policy (static vs. adaptive).
+
 ## Metrics
 
 The primary evaluation metrics will be:
