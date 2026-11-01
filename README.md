@@ -307,7 +307,7 @@ Figures are written to `results/analysis/` as PNG and SVG files. This step does 
 | `results/combined/` | Combined summaries |
 | `results/gpu/` | Separate GPU-monitoring outputs |
 | `results/analysis/` | Figures and derived GPU summary |
-| `docs/day13_results.md` | Detailed analysis and measurement limitations |
+| `docs/results.md` | Detailed analysis and measurement limitations |
 
 ## Limitations
 
