@@ -8,3 +8,11 @@ out/
 *.obj
 *.pdb
 *.ilk
+
+__pycache__/
+*.pyc
+
+/metrics.csv
+/metrics_*_test.csv
+
+/results/**/*.log

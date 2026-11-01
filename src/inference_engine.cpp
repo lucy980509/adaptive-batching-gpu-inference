@@ -32,9 +32,15 @@ InferenceEngine::InferenceEngine(const std::wstring& model_path)
     output_name = output_name_alloc.get();
 }
 
-void InferenceEngine::run_batch(const std::vector<Request>& batch) {
+void InferenceEngine::run_batch(std::vector<Request>& batch) {
     if (batch.empty()) {
         return;
+    }
+
+    TimePoint start_time = Clock::now();
+
+    for (Request& request : batch) {
+        request.start_service_time = start_time;
     }
 
     std::vector<float> batch_input;
@@ -46,9 +52,6 @@ void InferenceEngine::run_batch(const std::vector<Request>& batch) {
             request.input.end()
         );
     }
-
-    std::cout << "Batch input values: "
-              << batch_input.size() << '\n';
 
     std::vector<int64_t> input_shape = {
         static_cast<int64_t>(batch.size()),
@@ -73,14 +76,6 @@ void InferenceEngine::run_batch(const std::vector<Request>& batch) {
     const char* input_names[] = { input_name.c_str() };
     const char* output_names[] = { output_name.c_str() };
 
-    std::cout << "Batch:";
-
-    for (const Request& request : batch) {
-        std::cout << ' ' << request.id;
-    }
-
-    std::cout << '\n';
-
     auto outputs = session.Run(
         Ort::RunOptions{nullptr},
         input_names,
@@ -90,6 +85,9 @@ void InferenceEngine::run_batch(const std::vector<Request>& batch) {
         1
     );
 
-    std::cout << "Inference completed for "
-              << batch.size() << " requests.\n";
+    TimePoint finish_time = Clock::now();
+
+    for (Request& request : batch) {
+        request.finish_time = finish_time;
+    }
 }

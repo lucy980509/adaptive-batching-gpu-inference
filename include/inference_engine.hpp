@@ -18,5 +18,5 @@ private:
 public:
     InferenceEngine(const std::wstring& model_path);
 
-    void run_batch(const std::vector<Request>& batch);
+    void run_batch(std::vector<Request>& batch);
 };

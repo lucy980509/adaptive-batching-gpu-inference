@@ -10,6 +10,7 @@ using TimePoint = Clock::time_point;
 struct Request {
     uint64_t id;
     TimePoint arrival_time;
+    TimePoint scheduled_arrival_time;
 
     std::vector<float> input;
     TimePoint start_service_time;
@@ -18,5 +19,6 @@ struct Request {
     Request(uint64_t request_id){
         id = request_id;
         arrival_time = Clock::now();
+        scheduled_arrival_time = arrival_time;
     }
 };

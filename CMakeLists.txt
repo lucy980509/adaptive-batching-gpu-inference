@@ -32,6 +32,10 @@ add_executable(p3_inference
     src/main.cpp
     src/preprocess.cpp
     src/inference_engine.cpp
+    src/request_generator.cpp
+    src/static_batcher.cpp
+    src/adaptive_batcher.cpp
+    src/metrics.cpp
 )
 
 target_include_directories(p3_inference PRIVATE
