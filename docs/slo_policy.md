@@ -11,6 +11,15 @@ This extension adds a `slo` mode while retaining Static, Adaptive wait, and Adap
 
 There is no external production requirement. This is an experimental target chosen after observing the original baseline P95 values of roughly 1.9–4.6 ms for Static 1, and before collecting SLO-policy results. It allows room above baseline inference while making batch-formation delay relevant. The target and margin must remain fixed during the initial comparison; changes should be evaluated as separately labeled experiments.
 
+## Margin adjustment history
+
+The text and formulas in this document are the **initial pre-experiment definition**, which used a **2 ms** safety margin. They are kept unchanged as a record.
+
+- The initial 2 ms margin was tried in a Low-workload smoke test, which failed the 95% requirement.
+- After that observation the margin was adjusted to **10 ms**. This is exploratory policy development, not an untouched holdout evaluation.
+- The 96-run comparison (see [slo_results.md](slo_results.md)) and the four-policy GPU monitoring (see [slo_gpu_results.md](slo_gpu_results.md)) both used the fixed 10 ms margin. The code default in `include/slo_config.hpp` is 10 ms.
+- Wherever this document says 2 ms (including the `latest_dispatch` formula below), read 10 ms for the reported experiments.
+
 The queue is FIFO, requests use the same budget, and one producer creates them in arrival order. Therefore the front request has the earliest deadline. This implementation is not a heterogeneous-deadline/EDF scheduler.
 
 ## Deadline and slack

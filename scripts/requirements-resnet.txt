@@ -1,0 +1,29 @@
+# Direct dependencies for scripts/prepare_resnet50.py (Python 3.12, Windows).
+# Use only the dedicated environment .venv-resnet; the existing Python 3.6
+# environment used by the wafer/SLO scripts is not touched.
+#
+# Install (run from the repository root, in this order):
+#
+#   py -3.12 -m venv .venv-resnet
+#
+#   1) CPU-only PyTorch from the official PyTorch CPU index. This also pulls
+#      the numpy and pillow versions that torch/torchvision resolve to:
+#      .venv-resnet\Scripts\python.exe -m pip install torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
+#
+#   2) Remaining packages from PyPI:
+#      .venv-resnet\Scripts\python.exe -m pip install onnx==1.23.2 onnxscript==0.7.2 onnxruntime==1.26.0
+#
+# Python onnxruntime is pinned to 1.26.0 to match the C++ ONNX Runtime GPU
+# 1.26.0 build. This venv uses the CPU execution provider only; it does not
+# change CUDA, cuDNN, or the C++ ONNX Runtime installation.
+#
+# torchvision 0.29.2+cpu depends on torch 2.15.0+cpu, installed in step 1.
+# Full resolved versions are saved by the script to models/resnet50/pip_freeze.txt.
+
+torch==2.15.0
+torchvision==0.29.2
+numpy==2.5.4
+pillow==13.0.0
+onnx==1.23.2
+onnxscript==0.7.2
+onnxruntime==1.26.0
