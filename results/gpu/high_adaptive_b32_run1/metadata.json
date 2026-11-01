@@ -1,0 +1,14 @@
+{
+  "workload": "high",
+  "mode": "adaptive",
+  "configured_batch_size": 32,
+  "max_wait_ms": 10,
+  "repeat": 1,
+  "gpu_index": 0,
+  "query_interval_ms": 100,
+  "measurement_start_host": "2026-11-01T00:30:44.035375",
+  "measurement_end_host": "2026-11-01T00:30:54.041418",
+  "valid_measurement_samples": 91,
+  "gpu_measurement_enabled": true,
+  "scope": "whole_gpu"
+}

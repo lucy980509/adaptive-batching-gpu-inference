@@ -1,0 +1,4 @@
+run,workload,mode,configured_batch_size,samples,mean_gpu_util_percent,max_gpu_util_percent,completed_requests,throughput_rps,p95_ms,scope
+high_adaptive_b32_run1,high,adaptive,32,91,1.2857142857142858,9.0,1998,199.67105642518177,18.917374999999996,whole_gpu
+high_adaptive_immediate_b32_run2,high,adaptive_immediate,32,92,2.641304347826087,12.0,1998,199.96047628063425,4.993214999999999,whole_gpu
+high_static_b1_run1,high,static,1,92,2.5,10.0,1998,200.0083827337188,4.24473,whole_gpu

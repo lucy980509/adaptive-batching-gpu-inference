@@ -102,6 +102,8 @@ int main(int argc, char* argv[]) {
 
     RequestQueue request_queue;
 
+    std::cout << "MEASURE_START" << std::endl;
+
     std::thread producer([&request_queue, &input_data, config]() {
         generate_requests(request_queue, input_data, config);
     });
@@ -137,6 +139,8 @@ int main(int argc, char* argv[]) {
             engine.run_batch(batch);
             metrics.record_batch(batch);
         }
+
+        std::cout << "MEASURE_END" << std::endl;
     }
     catch (...) {
         producer.join();
