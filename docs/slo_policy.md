@@ -30,6 +30,8 @@ slack = deadline - now - estimated_service_time
 latest_dispatch = deadline - estimated_service_time - 2 ms
 ```
 
+Reading recorded slack: a negative `slack_at_service_start_ms` only says the request was already past `deadline - estimated service time` when service began, which includes time spent waiting in the queue. It is not by itself a service-time estimation error. The estimate is compared with the measured batch service time separately, in `service_minus_estimate_ms`.
+
 The safety margin is subtracted when deciding how long to wait, not from the reported latency target or the slack column. A positive raw slack smaller than 2 ms is already considered urgent by this policy.
 
 Deadline origin matches the existing code's `Request` construction time. Copying the input into the request and queue insertion occur afterwards and consume budget. Scheduled generator arrival is only used to measure generation lag; it is not the deadline origin.

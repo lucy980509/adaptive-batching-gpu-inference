@@ -10,14 +10,16 @@ MetricsLogger::MetricsLogger(
     int configured_batch_size,
     const std::string& policy_mode,
     const SloConfig& target_config,
-    const std::string& model
+    const std::string& model,
+    int configured_max_wait_ms
 )
     : metrics_file(csv_path),
       config(workload_config),
       batch_size(configured_batch_size),
       mode(policy_mode),
       slo_config(target_config),
-      model_name(model) {
+      model_name(model),
+      max_wait_ms(configured_max_wait_ms) {
 
     if (metrics_file.is_open()) {
         metrics_file << std::setprecision(12);
@@ -28,7 +30,9 @@ MetricsLogger::MetricsLogger(
             << "arrival_offset_ms,generation_lag_ms,"
             << "mode,slo_target_ms,slo_required_percent,safety_margin_ms,"
             << "deadline_offset_ms,estimated_service_ms,"
-            << "slack_at_service_start_ms,slo_met,model\n";
+            << "slack_at_service_start_ms,slo_met,model,"
+            << "image_index,max_wait_ms,scheduled_offset_ms,"
+            << "service_minus_estimate_ms\n";
     }
 }
 
@@ -40,6 +44,7 @@ void MetricsLogger::record_batch(const std::vector<Request>& batch) {
     for (const Request& request : batch) {
         if (completed_requests == 0) {
             first_arrival = request.arrival_time;
+            first_scheduled = request.scheduled_arrival_time;
         }
 
         last_finish = request.finish_time;
@@ -80,6 +85,17 @@ void MetricsLogger::record_batch(const std::vector<Request>& batch) {
                 request.deadline - request.start_service_time
             ).count() - request.estimated_service_ms;
 
+        // Planned arrival relative to request 1's planned arrival. It does not
+        // depend on the policy, so it can be compared between runs.
+        const double scheduled_offset_ms =
+            std::chrono::duration<double, std::milli>(
+                request.scheduled_arrival_time - first_scheduled
+            ).count();
+
+        // Measured service time minus the calibration estimate of this batch.
+        const double service_minus_estimate_ms =
+            service_ms - request.estimated_service_ms;
+
         const bool slo_met = request.finish_time <= request.deadline;
         if (slo_met) {
             ++slo_met_requests;
@@ -107,7 +123,11 @@ void MetricsLogger::record_batch(const std::vector<Request>& batch) {
             << request.estimated_service_ms << ','
             << slack_ms << ','
             << (slo_met ? 1 : 0) << ','
-            << model_name << '\n';
+            << model_name << ','
+            << request.image_index << ','
+            << (max_wait_ms >= 0 ? std::to_string(max_wait_ms) : std::string())
+            << ',' << scheduled_offset_ms << ','
+            << service_minus_estimate_ms << '\n';
     }
 }
 

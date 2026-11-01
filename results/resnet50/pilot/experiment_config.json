@@ -1,0 +1,46 @@
+{
+  "plan": [
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 1
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 1
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "high",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 1
+    }
+  ],
+  "seed": 42,
+  "repeats": 1,
+  "max_batch": 16,
+  "overrides": {
+    "duration_seconds": 5.0
+  },
+  "applied_common_settings": {
+    "slo_target_ms": "100",
+    "slo_required_percent": "95",
+    "safety_margin_ms": "10",
+    "duration_seconds": "5"
+  },
+  "executable_sha256": "0a4a175f25eb927af1b27b4b3d3382515bfcbc4b6a9603d24a842b05e205d489",
+  "python_version": "3.6.8 (tags/v3.6.8:3c6b436a57, Dec 24 2018, 00:16:47) [MSC v.1916 64 bit (AMD64)]",
+  "image_pool_size": 1000,
+  "image_order": "request id k carries image (k-1) % pool size; checked in every row",
+  "throughput_definition": "completed / (last finish - first actual arrival)",
+  "note": "generation_lag, request preparation cost and drain are described in the logs and summary.csv"
+}

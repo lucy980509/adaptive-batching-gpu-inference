@@ -180,7 +180,7 @@ int main(int argc, char* argv[]) {
         RequestQueue queue;
         const WorkloadConfig workload{"low", 2.0, 1, 0, 0};
         std::thread producer([&queue, workload] {
-            generate_requests(queue, std::vector<float>{1.0f}, workload,
+            generate_requests(queue, std::vector<std::vector<float>>{{1.0f}}, workload,
                               std::chrono::milliseconds(37));
         });
         int generated = 0;
@@ -194,6 +194,30 @@ int main(int argc, char* argv[]) {
         producer.join();
         require(generated > 0 && generated <= 2,
                 "Generator did not close or emitted an invalid count");
+    }
+
+    {
+        // Image order: request id k carries pool image (k - 1) % pool size,
+        // wrapping around, so every policy sees the same image per request id.
+        RequestQueue queue;
+        const WorkloadConfig workload{"order", 100.0, 1, 0, 0};
+        const std::vector<std::vector<float>> pool{{10.0f}, {20.0f}, {30.0f}};
+        std::thread producer([&queue, workload, &pool] {
+            generate_requests(queue, pool, workload,
+                              std::chrono::milliseconds(50));
+        });
+        int seen = 0;
+        Request request(0);
+        while (queue.pop(request)) {
+            require(request.image_index == (request.id - 1) % pool.size(),
+                    "Image index does not follow the request id");
+            require(request.input == pool[request.image_index],
+                    "Request input is not the selected pool image");
+            ++seen;
+        }
+        producer.join();
+        require(seen > static_cast<int>(pool.size()),
+                "Image order test did not wrap around the pool");
     }
 
     require(argc == 2, "Pass a temporary CSV path");

@@ -1,3 +1,8 @@
+#define NOMINMAX
+#define PSAPI_VERSION 2
+#include <windows.h>
+#include <psapi.h>
+
 #include "../include/request_queue.hpp"
 #include "../include/inference_engine.hpp"
 #include "../include/workload.hpp"
@@ -23,6 +28,73 @@
 #include <vector>
 
 namespace {
+
+// Peak physical memory of this process so far, in MiB (-1 if unavailable).
+double peak_working_set_mib() {
+    PROCESS_MEMORY_COUNTERS counters{};
+
+    if (!GetProcessMemoryInfo(
+            GetCurrentProcess(), &counters, sizeof(counters))) {
+        return -1.0;
+    }
+
+    return static_cast<double>(counters.PeakWorkingSetSize) / (1024.0 * 1024.0);
+}
+
+// Optional settings after the four positional arguments. Defaults live in
+// workload.hpp (rates), slo_config.hpp (SLO numbers) and here (max wait);
+// anything not given on the command line keeps its default.
+struct RunOptions {
+    int duration_seconds = kDefaultWorkloadSeconds;
+    SloConfig slo;
+    int max_wait_ms = 10;
+};
+
+RunOptions parse_options(int argc, char* argv[]) {
+    RunOptions options;
+
+    for (int i = 5; i < argc; i += 2) {
+        const std::string name = argv[i];
+
+        if (i + 1 >= argc) {
+            throw std::invalid_argument("Missing value for " + name);
+        }
+
+        const double value = std::stod(argv[i + 1]);
+
+        if (name == "--duration") {
+            options.duration_seconds = static_cast<int>(value);
+        }
+        else if (name == "--slo-ms") {
+            options.slo.latency_target =
+                std::chrono::milliseconds(static_cast<long long>(value));
+        }
+        else if (name == "--margin-ms") {
+            options.slo.safety_margin =
+                std::chrono::milliseconds(static_cast<long long>(value));
+        }
+        else if (name == "--required-percent") {
+            options.slo.target_attainment_percent = value;
+        }
+        else if (name == "--max-wait-ms") {
+            options.max_wait_ms = static_cast<int>(value);
+        }
+        else {
+            throw std::invalid_argument("Unknown option: " + name);
+        }
+    }
+
+    if (options.duration_seconds <= 0 ||
+        options.slo.latency_target.count() <= 0 ||
+        options.slo.safety_margin.count() < 0 ||
+        options.slo.target_attainment_percent <= 0.0 ||
+        options.slo.target_attainment_percent > 100.0 ||
+        options.max_wait_ms < 0) {
+        throw std::invalid_argument("An option value is out of range");
+    }
+
+    return options;
+}
 
 bool is_supported_batch_size(const std::string& text) {
     return text == "1" || text == "4" || text == "8" ||
@@ -54,14 +126,16 @@ std::vector<Request> make_fixed_batch(
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc != 5) {
+    if (argc < 5) {
         std::cerr
             << "Usage: p3_inference.exe "
             << "<workload> <static|adaptive|adaptive_immediate|slo> "
-            << "<batch_size> <csv_path>\n"
+            << "<batch_size> <csv_path> [options]\n"
             << "       p3_inference.exe <any> model_check <1|4> <logits_path>\n"
             << "       p3_inference.exe <any> batch_profile "
-            << "<1|4|8|16|32> <csv_path>\n";
+            << "<1|4|8|16|32> <csv_path>\n"
+            << "Options (serving): --duration <s> --slo-ms <ms> "
+            << "--margin-ms <ms> --required-percent <p> --max-wait-ms <ms>\n";
         return 1;
     }
 
@@ -83,6 +157,16 @@ int main(int argc, char* argv[]) {
     }
 
     const ModelConfig model = resnet50_model_config();
+
+    RunOptions options;
+
+    try {
+        options = parse_options(argc, argv);
+    }
+    catch (const std::exception& error) {
+        std::cerr << "Bad option: " << error.what() << '\n';
+        return 1;
+    }
 
     // Model check: load the model on CUDA and run the first 1 or 4 prepared
     // images once. The logits are written as raw float32 to <logits_path> so
@@ -211,64 +295,60 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // The generator still copies one input into every request. The fixed image
-    // pool with one shared order for all policies is the next step, so serving
-    // is switched off until then instead of reusing a single image.
-    const bool image_pool_connected = false;
-
-    if (!image_pool_connected) {
-        std::cerr
-            << "Serving is disabled until the ImageNet image pool is "
-            << "connected to the request generator. Use model_check or "
-            << "batch_profile.\n";
-        return 1;
-    }
-
+    // batch_size is the maximum batch size: the fixed size for Static, the
+    // upper limit for the other policies.
     const int batch_size = std::stoi(batch_argument);
-    const auto max_wait = std::chrono::milliseconds(10);
-    const SloConfig slo_config{};
 
     WorkloadConfig config{};
 
-    if (workload_name == "low") {
-        config = {"low", 2.0, 10, 0, 0};
+    try {
+        config = get_workload(workload_name, options.duration_seconds);
     }
-    else if (workload_name == "medium") {
-        config = {"medium", 20.0, 10, 0, 0};
-    }
-    else if (workload_name == "high") {
-        config = {"high", 200.0, 10, 0, 0};
-    }
-    else if (workload_name == "bursty") {
-        config = {"bursty", 200.0, 10, 500, 1500};
-    }
-    else {
-        std::cerr << "Unknown workload.\n";
+    catch (const std::exception& error) {
+        std::cerr << error.what() << " (use low, medium, high or bursty)\n";
         return 1;
     }
 
+    const auto max_wait = std::chrono::milliseconds(options.max_wait_ms);
+    const SloConfig& slo_config = options.slo;
+
     std::unique_ptr<InferenceEngine> engine_holder;
+    std::vector<std::vector<float>> image_pool;
 
     try {
         engine_holder = std::make_unique<InferenceEngine>(model);
+
+        // The whole prepared subset is read into RAM once, before anything is
+        // measured. Requests copy from it by index.
+        image_pool = read_prepared_images(
+            kPreparedImagePath, kPreparedImageCount,
+            model.input_elements(), 0, kPreparedImageCount
+        );
     }
     catch (const std::exception& error) {
-        std::cerr << "Failed to load model: " << error.what() << '\n';
+        std::cerr << "Startup failed: " << error.what() << '\n';
         return 1;
     }
 
     InferenceEngine& engine = *engine_holder;
 
-    // Placeholder until the image pool exists (unreachable while
-    // image_pool_connected is false): the first prepared image.
-    std::vector<float> input_data =
-        read_prepared_images(
-            kPreparedImagePath, kPreparedImageCount,
-            model.input_elements(), 0, 1
-        )[0];
+    std::cout << "Image pool: " << image_pool.size()
+              << " images loaded; peak working set "
+              << peak_working_set_mib() << " MiB\n";
+
+    // Only Adaptive wait uses a maximum wait; Adaptive immediate waits 0 ms.
+    int recorded_max_wait_ms = -1;
+
+    if (mode == "adaptive") {
+        recorded_max_wait_ms = options.max_wait_ms;
+    }
+    else if (mode == "adaptive_immediate") {
+        recorded_max_wait_ms = 0;
+    }
 
     MetricsLogger metrics(
-        csv_path, config, batch_size, mode, slo_config, model.name
+        csv_path, config, batch_size, mode, slo_config, model.name,
+        recorded_max_wait_ms
     );
 
     if (!metrics.is_open()) {
@@ -276,17 +356,19 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Calibration covers every batch size from 1 up to the configured maximum,
+    // because partial batches (for example at queue closure) can occur.
     std::cout << "Warm-up started.\n";
     const int warmup_runs = 3;
     const int calibration_runs = 10;
-    ServiceTimeEstimator estimator(32);
+    ServiceTimeEstimator estimator(static_cast<std::size_t>(batch_size));
 
-    for (int size = 1; size <= 32; ++size) {
+    for (int size = 1; size <= batch_size; ++size) {
         std::vector<Request> warmup_batch;
 
         for (int i = 0; i < size; ++i) {
             Request req(0);
-            req.input = input_data;
+            req.input = image_pool[i];
             warmup_batch.push_back(req);
         }
 
@@ -322,7 +404,8 @@ int main(int argc, char* argv[]) {
         << "batch_size,estimated_service_ms,calibration_runs,"
         << "safety_margin_ms,estimator\n";
 
-    for (std::size_t size = 1; size <= 32; ++size) {
+    for (std::size_t size = 1; size <= static_cast<std::size_t>(batch_size);
+         ++size) {
         profile_file << size << ',' << estimator.estimate_ms(size) << ','
                      << calibration_runs << ','
                      << slo_config.safety_margin.count() << ','
@@ -330,21 +413,33 @@ int main(int argc, char* argv[]) {
     }
 
     profile_file.close();
-    std::cout << "Warm-up completed.\n";
+    std::cout << "Warm-up completed (batch sizes 1.." << batch_size << ").\n";
     std::cout << "Calibration saved: " << profile_path << '\n';
     std::cout << "SLO budget: " << slo_config.latency_target.count()
               << " ms | Required attainment: "
               << slo_config.target_attainment_percent
               << "% | Safety margin: "
               << slo_config.safety_margin.count() << " ms\n";
+    std::cout << "Workload: " << config.name << " | "
+              << config.requests_per_second << " requests/s | "
+              << config.duration_seconds << " s";
+
+    if (config.burst_on_ms > 0) {
+        std::cout << " | on " << config.burst_on_ms << " ms / off "
+                  << config.burst_off_ms << " ms";
+    }
+
+    std::cout << "\nImage order: request id k carries image (k-1) % "
+              << image_pool.size() << '\n';
 
     RequestQueue request_queue;
+    GeneratorStats generator_stats;
 
     std::cout << "MEASURE_START" << std::endl;
 
-    std::thread producer([&request_queue, &input_data, config, slo_config]() {
-        generate_requests(
-            request_queue, input_data, config, slo_config.latency_target
+    std::thread producer([&]() {
+        generator_stats = generate_requests(
+            request_queue, image_pool, config, slo_config.latency_target
         );
     });
 
@@ -387,6 +482,7 @@ int main(int argc, char* argv[]) {
                 request.estimated_service_ms = estimated_ms;
             }
 
+            // No logits are requested here: output copying is off while serving.
             engine.run_batch(batch);
             metrics.record_batch(batch);
         }
@@ -401,7 +497,36 @@ int main(int argc, char* argv[]) {
     producer.join();
 
     std::cout << "Mode: " << mode << '\n';
-    std::cout << "Configured batch size: " << batch_size << '\n';
+    std::cout << "Configured max batch size: " << batch_size << '\n';
+
+    std::cout << "Scheduled requests: " << generator_stats.scheduled << '\n';
+    std::cout << "Generated requests: " << generator_stats.generated << '\n';
+    std::cout << "Not generated at the window boundary: "
+              << generator_stats.scheduled - generator_stats.generated << '\n';
+    std::cout << "Request preparation (image copy + queue push) per request: mean "
+              << generator_stats.prepare_mean_us << " us, max "
+              << generator_stats.prepare_max_us << " us\n";
+
+    // Signed offset: last completion minus the end of the generation window
+    // (negative when the last request finished before the window ended).
+    // Drain is that offset clamped at 0: extra time spent after generation ended.
+    const double last_completion_offset_ms =
+        std::chrono::duration<double, std::milli>(
+            metrics.last_finish_time() - generator_stats.end
+        ).count();
+    const double drain_ms = std::max(0.0, last_completion_offset_ms);
+    const double interval_s =
+        std::chrono::duration<double>(
+            metrics.last_finish_time() - metrics.first_arrival_time()
+        ).count();
+
+    std::cout << "Drain after generation end: " << drain_ms << " ms\n";
+    std::cout << "Last completion minus generation end (signed): "
+              << last_completion_offset_ms << " ms\n";
+    std::cout << "Measurement interval (first arrival to last finish): "
+              << interval_s << " s (generation window "
+              << config.duration_seconds << " s)\n";
+    std::cout << "Peak working set: " << peak_working_set_mib() << " MiB\n";
 
     metrics.print_summary();
 

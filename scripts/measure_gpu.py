@@ -17,7 +17,9 @@ def main():
     parser.add_argument('mode', choices=['static', 'adaptive', 'adaptive_immediate', 'slo'])
     parser.add_argument('batch_size', type=int, choices=[1, 4, 8, 16, 32])
     parser.add_argument('--run', type=int, default=1)
-    args = parser.parse_args()
+    # Any other option (--duration, --slo-ms, --margin-ms, --required-percent,
+    # --max-wait-ms) is passed to p3_inference unchanged and checked against the CSV.
+    args, extra = parser.parse_known_args()
 
     if not EXE.is_file():
         raise FileNotFoundError('Executable not found: ' + str(EXE))
@@ -56,7 +58,7 @@ def main():
             with log_path.open('w', encoding='utf-8') as log_file:
                 process = subprocess.Popen(
                     [str(EXE), args.workload, args.mode,
-                     str(args.batch_size), str(request_path)],
+                     str(args.batch_size), str(request_path)] + extra,
                     cwd=str(ROOT), stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT, universal_newlines=True,
                     encoding='utf-8', errors='replace', bufsize=1,
@@ -97,10 +99,20 @@ def main():
         if (row['mode'] != args.mode or row['workload'] != args.workload or
                 int(row['max_batch_size']) != args.batch_size):
             raise RuntimeError('Request CSV does not match the command')
-        if (float(row['slo_target_ms']) != 20 or
-                float(row['safety_margin_ms']) != 10 or
-                float(row['slo_required_percent']) != 95):
-            raise RuntimeError('Expected SLO 20 ms, margin 10 ms, requirement 95%. Check configuration and rebuild.')
+        if any(row[c] != requests[0][c] for c in (
+                'slo_target_ms', 'safety_margin_ms', 'slo_required_percent',
+                'target_rps', 'duration_seconds', 'max_wait_ms')):
+            raise RuntimeError('Settings change inside one run')
+    override_columns = {'--duration': 'duration_seconds', '--slo-ms': 'slo_target_ms',
+                        '--margin-ms': 'safety_margin_ms',
+                        '--required-percent': 'slo_required_percent',
+                        '--max-wait-ms': 'max_wait_ms'}
+    for index in range(0, len(extra) - 1, 2):
+        column = override_columns.get(extra[index])
+        recorded = requests[0][column] if column else None
+        if column and recorded != '' and float(recorded) != float(extra[index + 1]):
+            raise RuntimeError('CSV {}={} differs from {} {}'.format(
+                column, recorded, extra[index], extra[index + 1]))
 
     measured_utilization = []
     with raw_path.open(newline='', encoding='utf-8') as raw_file, samples_path.open(
@@ -137,8 +149,10 @@ def main():
         'workload': args.workload,
         'mode': args.mode,
         'configured_batch_size': args.batch_size,
-        'max_wait_ms': 10 if args.mode == 'adaptive' else (
-            0 if args.mode == 'adaptive_immediate' else None),
+        'max_wait_ms': (float(requests[0]['max_wait_ms'])
+                        if requests[0]['max_wait_ms'] != '' else None),
+        'target_rps': float(requests[0]['target_rps']),
+        'duration_seconds': float(requests[0]['duration_seconds']),
         'slo_target_ms': float(requests[0]['slo_target_ms']),
         'safety_margin_ms': float(requests[0]['safety_margin_ms']),
         'slo_required_percent': float(requests[0]['slo_required_percent']),

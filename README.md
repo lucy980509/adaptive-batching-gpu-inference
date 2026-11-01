@@ -7,7 +7,9 @@ A C++17 inference-serving experiment that compares four request-batching policie
 - **Adaptive immediate**: queue-based batch size without waiting to accumulate
 - **SLO-aware**: dispatch time computed from request deadlines and estimated service time
 
-**Status:** the ResNet-50 model, a fixed 1,000-image ImageNet validation subset, and a per-batch service-time profile are done. **The formal policy comparison has not started.** Request rates, maximum batch size, the SLO, and the safety margin are not decided yet; they will be chosen after looking at the batch profile. The serving loop is disabled until the image pool is connected to the request generator (`p3_inference` exits with a message when asked to serve).
+**Status:** the ResNet-50 model, a fixed 1,000-image ImageNet validation subset, the per-batch service-time profile, and the image pool connected to the request generator are done, and a 4-run pilot has been executed (`results/resnet50/pilot/`, not formal results; it predates the extra CSV columns and the generator fix below). **The formal comparison is configured but has not been run yet.**
+
+Comparison settings (confirmed; defaults in `include/workload.hpp` and `include/slo_config.hpp`, the only place they live; every CSV row records the values actually used): Low 20 / Medium 100 / High 250 requests/s; Bursty 250 requests/s while active (500 ms on, 1500 ms off); requests are generated for 10 s and all remaining requests are then processed; SLO 100 ms, required attainment 95%, safety margin 10 ms; Static batch 1 / 4 / 8 / 16; Adaptive wait (max wait 10 ms), Adaptive immediate and SLO-aware with max batch 16; 4 workloads x 7 policies x 3 repeats = **84 runs**. The settings are not changed to make a policy pass. Options `--duration`, `--slo-ms`, `--margin-ms`, `--required-percent`, `--max-wait-ms` can override them for experiments such as the pilot.
 
 ## Background
 
@@ -90,12 +92,26 @@ python scripts\profile_batches.py
 Command line:
 
 ```text
-p3_inference.exe <workload> <static|adaptive|adaptive_immediate|slo> <batch_size> <csv_path>
+p3_inference.exe <workload> <static|adaptive|adaptive_immediate|slo> <max_batch> <csv_path> [options]
 p3_inference.exe <any> model_check <1|4> <logits_path>
 p3_inference.exe <any> batch_profile <1|4|8|16|32> <csv_path>
 ```
 
-Run from the repository root so relative paths resolve. Serving modes exit with a message until the image pool is connected. Scheduler logic is covered by `tests/test_slo.cpp`, a dependency-free test that is not part of the CMake build; compile it with the queue, batcher, metrics, and generator sources and pass a temporary CSV path as its argument.
+Serving loads the whole prepared subset into RAM once, calibrates service time for every batch size from 1 up to `max_batch` (partial batches can occur), then generates requests: request id `k` always carries image `(k-1) % 1000`, so all policies see the same image for the same id. Each request copies its image into `Request.input` after its arrival time is stamped, so the copy and queue push count against its latency. Logits are never copied while serving. Pilot run (4 jobs, explicit order):
+
+```bat
+python scripts\run_slo_experiments.py --max-batch 16 --duration 5 --repeats 1 --output results\resnet50\pilot --only low:static:1 high:static:1 high:static:16 high:slo:16
+```
+
+Run from the repository root so relative paths resolve. Scheduler logic is covered by `tests/test_slo.cpp`, a dependency-free test that is not part of the CMake build; compile it with the queue, batcher, metrics, and generator sources and pass a temporary CSV path as its argument.
+
+## Measurement Notes
+
+- **Generator**: a planned arrival slot is always generated, even if the thread wakes after the window ended, so request id `k` has the same image and the same planned arrival offset in every run. `scheduled`, `generated`, and `not generated` counts are logged per run; each generated request must complete exactly once.
+- **Drain** is `max(0, last completion - end of the generation window)`. The signed value (negative when the last request finished before the window ended) is logged separately as `last_completion_minus_generation_end_ms`.
+- **Slack**: `slack_at_service_start_ms` is `deadline - service start - estimated service time`. A negative value means the request was already past that point when service began, which includes queue wait; it is not by itself a service-time estimation error. The estimate is compared with reality separately in `service_minus_estimate_ms` (measured batch service time minus its calibration estimate).
+- **Arrival timing**: actual arrivals are not assumed to be the same in every run. Generation lag (actual minus planned arrival) and arrival gaps are summarized per run. In the pilot, lag averaged 7-8 ms with a maximum near 15.7 ms and many arrivals followed each other less than 1 ms apart. That is what was observed; operating-system timer granularity is a hypothesis that has not been tested, and no timer change or busy waiting is used.
+- **Aggregation**: percentiles are computed per run, then averaged (with sample SD) over runs; they are not pooled over requests of different runs. GPU monitoring is not part of the 84 runs and is run separately.
 
 ## Repository Layout
 
@@ -104,16 +120,16 @@ Run from the repository root so relative paths resolve. Serving modes exit with 
 | `include/`, `src/` | Request queue, generator, Static/Adaptive/SLO batchers, service-time estimator, metrics, inference engine, dataset reader, model config |
 | `scripts/prepare_resnet50.py`, `prepare_imagenet_subset.py`, `verify_resnet_inputs.py` | Model export, data preparation, and input verification |
 | `scripts/profile_batches.py` | Per-batch service-time profile |
-| `scripts/run_slo_experiments.py`, `measure_gpu.py`, `plot_slo_*.py`, `check_slo.py`, `check_metrics.py` | Policy comparison, GPU monitoring, plots, and CSV checks. Reused from the wafer stage and **not yet adapted**: they still assume the old workloads and a 20 ms SLO with a 10 ms margin, to be re-parameterized once the ResNet-50 settings are chosen |
+| `scripts/run_slo_experiments.py`, `measure_gpu.py`, `check_slo.py`, `check_metrics.py` | Policy comparison, GPU monitoring, and CSV checks. They read the settings recorded in the CSVs instead of assuming SLO numbers |
+| `scripts/plot_slo_results.py`, `plot_slo_gpu.py` | Plots from the wafer stage, **not yet adapted** to the ResNet-50 matrix and CSV columns; rewrite them when the formal results exist |
 | `docs/slo_policy.md` | SLO-aware policy definition and margin history |
 | `results/resnet50/` | ResNet-50 measurements |
 | `models/`, `data/` | Model and dataset files (ignored by Git) |
 
 ## Next Steps
 
-- Connect the fixed image pool, with one shared order and arrival schedule, to the request generator.
-- Choose request rates, maximum batch size, SLO, and safety margin from the batch profile.
-- Run the Static / Adaptive wait / Adaptive immediate / SLO-aware comparison with repeats and GPU monitoring.
+- Run the 84-run comparison: `python scripts\run_slo_experiments.py --max-batch 16 --repeats 3` (writes `results/resnet50/comparison/`; refuses to overwrite).
+- Adapt the plot scripts to the results, and run GPU monitoring separately.
 
 ## Completion Status
 
@@ -122,6 +138,9 @@ Run from the repository root so relative paths resolve. Serving modes exit with 
 - [x] ResNet-50 ONNX export and real-image input verification (PyTorch / ORT CPU / C++ CUDA)
 - [x] Fixed 1,000-image ImageNet validation subset
 - [x] Per-batch service-time profile (single session)
-- [ ] Image pool connected to the generator
-- [ ] Workloads, maximum batch size, and SLO chosen for ResNet-50
+- [x] Image pool connected to the generator (fixed order, shared by all policies)
+- [x] Settings generalized and recorded in every CSV; 4-run pilot executed
+- [x] Workloads, maximum batch size, and SLO confirmed for ResNet-50
+- [ ] 84-run comparison executed
+- [ ] Plot scripts adapted
 - [ ] ResNet-50 policy comparison (not started)
