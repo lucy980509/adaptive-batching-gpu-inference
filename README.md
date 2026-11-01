@@ -324,7 +324,7 @@ Figures are written to `results/analysis/` as PNG and SVG files. This step does 
 - The pipeline reuses one input image and does not include network serving.
 - A precise CPU, transfer, or GPU bottleneck has not been established.
 
-See [the detailed analysis](docs/day13_results.md) for further discussion.
+See [the detailed analysis](docs/results.md) for further discussion.
 
 ## Connection to Previous Projects
 
