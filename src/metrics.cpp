@@ -9,13 +9,15 @@ MetricsLogger::MetricsLogger(
     const WorkloadConfig& workload_config,
     int configured_batch_size,
     const std::string& policy_mode,
-    const SloConfig& target_config
+    const SloConfig& target_config,
+    const std::string& model
 )
     : metrics_file(csv_path),
       config(workload_config),
       batch_size(configured_batch_size),
       mode(policy_mode),
-      slo_config(target_config) {
+      slo_config(target_config),
+      model_name(model) {
 
     if (metrics_file.is_open()) {
         metrics_file << std::setprecision(12);
@@ -26,7 +28,7 @@ MetricsLogger::MetricsLogger(
             << "arrival_offset_ms,generation_lag_ms,"
             << "mode,slo_target_ms,slo_required_percent,safety_margin_ms,"
             << "deadline_offset_ms,estimated_service_ms,"
-            << "slack_at_service_start_ms,slo_met\n";
+            << "slack_at_service_start_ms,slo_met,model\n";
     }
 }
 
@@ -104,7 +106,8 @@ void MetricsLogger::record_batch(const std::vector<Request>& batch) {
             << deadline_offset_ms << ','
             << request.estimated_service_ms << ','
             << slack_ms << ','
-            << (slo_met ? 1 : 0) << '\n';
+            << (slo_met ? 1 : 0) << ','
+            << model_name << '\n';
     }
 }
 

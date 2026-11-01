@@ -13,6 +13,13 @@
 #   2) Remaining packages from PyPI:
 #      .venv-resnet\Scripts\python.exe -m pip install onnx==1.23.2 onnxscript==0.7.2 onnxruntime==1.26.0
 #
+#   3) For scripts/prepare_imagenet_subset.py (Hugging Face download, parquet reading):
+#      .venv-resnet\Scripts\python.exe -m pip install datasets==5.1.0
+#      (pulls huggingface_hub 2.4.0 and pyarrow 26.0.0; the script itself uses
+#      huggingface_hub and pyarrow directly, not datasets.load_dataset, so that
+#      only the validation split is downloaded.) This step downgraded fsspec
+#      from 2026.9.0 to 2026.7.0 as required by datasets; pip check stays clean.
+#
 # Python onnxruntime is pinned to 1.26.0 to match the C++ ONNX Runtime GPU
 # 1.26.0 build. This venv uses the CPU execution provider only; it does not
 # change CUDA, cuDNN, or the C++ ONNX Runtime installation.
@@ -27,3 +34,6 @@ pillow==13.0.0
 onnx==1.23.2
 onnxscript==0.7.2
 onnxruntime==1.26.0
+datasets==5.1.0
+huggingface_hub==2.4.0
+pyarrow==26.0.0

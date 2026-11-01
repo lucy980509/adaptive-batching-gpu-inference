@@ -9,21 +9,26 @@
 #include "../include/slo_batcher.hpp"
 #include "../include/slo_config.hpp"
 #include "../include/service_time_estimator.hpp"
+#include "../include/model_config.hpp"
+#include "../include/dataset.hpp"
 
 #include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
 int main(int argc, char* argv[]) {
-    if (argc != 5) {
+    if (argc != 5 && argc != 6) {
         std::cerr
             << "Usage: p3_inference.exe "
             << "<workload> <static|adaptive|adaptive_immediate|slo> "
-            << "<batch_size> <csv_path>\n";
+            << "<batch_size> <csv_path> [wafer|resnet50]\n"
+            << "       p3_inference.exe <workload> model_check <1|4> <csv_path> "
+            << "[wafer|resnet50]   (model check; resnet50 writes logits to csv_path)\n";
         return 1;
     }
 
@@ -31,13 +36,119 @@ int main(int argc, char* argv[]) {
     const std::string mode = argv[2];
     const std::string batch_argument = argv[3];
     const std::string csv_path = argv[4];
+    const std::string model_name = (argc == 6) ? argv[5] : "wafer";
 
     if (mode != "static" &&
         mode != "adaptive" &&
         mode != "adaptive_immediate" &&
-        mode != "slo") {
+        mode != "slo" &&
+        mode != "model_check") {
         std::cerr
-            << "Mode must be static, adaptive, adaptive_immediate or slo.\n";
+            << "Mode must be static, adaptive, adaptive_immediate, slo "
+            << "or model_check.\n";
+        return 1;
+    }
+
+    ModelConfig model;
+
+    try {
+        model = get_model_config(model_name);
+    }
+    catch (const std::exception& error) {
+        std::cerr << error.what() << " (use wafer or resnet50)\n";
+        return 1;
+    }
+
+    // Model check: load the model on CUDA and run one batch of 1 or 4. No
+    // workload, calibration, serving loop, or metrics CSV is started.
+    // wafer: synthetic constant input (connection check only).
+    // resnet50: the first images of the prepared ImageNet subset; the logits
+    // are written as raw float32 to <csv_path> so they can be compared with
+    // PyTorch (scripts/verify_resnet_inputs.py). This is the only place the
+    // output is copied; the serving loop never requests it.
+    if (mode == "model_check") {
+        if (batch_argument != "1" &&
+            !(batch_argument == "4" && model.name == "resnet50")) {
+            std::cerr << "model_check runs batch size 1 (resnet50: 1 or 4).\n";
+            return 1;
+        }
+
+        const std::size_t check_size = std::stoul(batch_argument);
+
+        try {
+            InferenceEngine engine(model);
+
+            std::vector<Request> batch;
+
+            if (model.name == "resnet50") {
+                const std::vector<std::vector<float>> images =
+                    read_prepared_images(
+                        kPreparedImagePath, kPreparedImageCount,
+                        model.input_elements(), 0, check_size
+                    );
+
+                for (std::size_t i = 0; i < check_size; ++i) {
+                    Request req(i);
+                    req.input = images[i];
+                    batch.push_back(req);
+                }
+            }
+            else {
+                Request req(0);
+                req.input.assign(model.input_elements(), 0.5f);
+                batch.push_back(req);
+            }
+
+            std::vector<float> output;
+            engine.run_batch(batch, &output);
+
+            const std::size_t per_image = output.size() / batch.size();
+            std::cout << "MODEL_CHECK model=" << model.name
+                      << " batch=" << batch.size()
+                      << " output_values=" << output.size() << '\n';
+
+            for (std::size_t n = 0; n < batch.size(); ++n) {
+                std::size_t top1 = 0;
+                for (std::size_t i = 1; i < per_image; ++i) {
+                    if (output[n * per_image + i] >
+                        output[n * per_image + top1]) {
+                        top1 = i;
+                    }
+                }
+                std::cout << "  image " << n << " top1_index=" << top1 << '\n';
+            }
+
+            if (model.name == "resnet50") {
+                std::ofstream logits_file(csv_path, std::ios::binary);
+                logits_file.write(
+                    reinterpret_cast<const char*>(output.data()),
+                    static_cast<std::streamsize>(output.size() * sizeof(float))
+                );
+                if (!logits_file) {
+                    throw std::runtime_error("Cannot write logits: " + csv_path);
+                }
+                std::cout << "Logits written: " << csv_path << '\n'
+                          << "Real prepared ImageNet images; model check only, "
+                          << "not a serving or performance result.\n";
+            }
+            else {
+                std::cout << "Synthetic constant input; connection check only, "
+                          << "not a serving or accuracy result.\n";
+            }
+        }
+        catch (const std::exception& error) {
+            std::cerr << "Model check failed: " << error.what() << '\n';
+            return 1;
+        }
+
+        return 0;
+    }
+
+    if (model.name != "wafer") {
+        std::cerr
+            << "Serving with model '" << model.name << "' requires prepared "
+            << "ImageNet input data, which is not available yet. "
+            << "Use model_check to verify model loading only.\n";
         return 1;
     }
 
@@ -73,8 +184,20 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    InferenceEngine engine(L"models/wafer_fault_cnn.onnx");
+    std::unique_ptr<InferenceEngine> engine_holder;
 
+    try {
+        engine_holder = std::make_unique<InferenceEngine>(model);
+    }
+    catch (const std::exception& error) {
+        std::cerr << "Failed to load model: " << error.what() << '\n';
+        return 1;
+    }
+
+    InferenceEngine& engine = *engine_holder;
+
+    // Only the wafer model reaches this point (checked above), so its
+    // grayscale 24x24 preprocessing is the correct input.
     std::vector<float> input_data =
         preprocess_image("test_images/sample.png");
 
@@ -82,7 +205,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    MetricsLogger metrics(csv_path, config, batch_size, mode, slo_config);
+    MetricsLogger metrics(
+        csv_path, config, batch_size, mode, slo_config, model.name
+    );
 
     if (!metrics.is_open()) {
         std::cerr << "Failed to open CSV: " << csv_path << '\n';

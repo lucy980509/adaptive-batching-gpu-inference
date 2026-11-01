@@ -1,5 +1,6 @@
 #pragma once
 
+#include "model_config.hpp"
 #include "request.hpp"
 
 #include <string>
@@ -12,11 +13,16 @@ private:
     Ort::SessionOptions session_options;
     Ort::Session session{nullptr};
 
+    ModelConfig model;
     std::string input_name;
     std::string output_name;
 
 public:
-    InferenceEngine(const std::wstring& model_path);
+    InferenceEngine(const ModelConfig& model_config);
 
-    void run_batch(std::vector<Request>& batch);
+    // If output_values is not null, the first output tensor is copied into it.
+    void run_batch(
+        std::vector<Request>& batch,
+        std::vector<float>* output_values = nullptr
+    );
 };
