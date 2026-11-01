@@ -1,14 +1,22 @@
 import argparse
 import csv
+import hashlib
 import json
+import re
 import statistics
 import subprocess
 from datetime import datetime
-
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EXE = ROOT / 'build' / 'Release' / 'p3_inference.exe'
+MANIFEST = ROOT / 'data' / 'imagenet' / 'val1000_manifest.json'
+DEFAULT_OUTPUT_ROOT = ROOT / 'results' / 'resnet50' / 'gpu'
+
+
+def git(*args):
+    return subprocess.check_output(['git'] + list(args), cwd=str(ROOT),
+                                   universal_newlines=True).strip()
 
 
 def main():
@@ -17,6 +25,7 @@ def main():
     parser.add_argument('mode', choices=['static', 'adaptive', 'adaptive_immediate', 'slo'])
     parser.add_argument('batch_size', type=int, choices=[1, 4, 8, 16, 32])
     parser.add_argument('--run', type=int, default=1)
+    parser.add_argument('--output-root', type=Path, default=DEFAULT_OUTPUT_ROOT)
     # Any other option (--duration, --slo-ms, --margin-ms, --required-percent,
     # --max-wait-ms) is passed to p3_inference unchanged and checked against the CSV.
     args, extra = parser.parse_known_args()
@@ -29,7 +38,7 @@ def main():
     name = '{}_{}_b{}_run{}'.format(
         args.workload, args.mode, args.batch_size, args.run
     )
-    output_dir = ROOT / 'results' / 'resnet50' / 'gpu' / name
+    output_dir = args.output_root / name
     output_dir.mkdir(parents=True, exist_ok=False)
 
     request_path = output_dir / 'requests.csv'
@@ -114,6 +123,22 @@ def main():
             raise RuntimeError('CSV {}={} differs from {} {}'.format(
                 column, recorded, extra[index], extra[index + 1]))
 
+    # Every generated request must complete exactly once, in the planned image order.
+    images = int(json.loads(MANIFEST.read_text(encoding='utf-8'))['selection']['count'])
+    ids = sorted(int(r['request_id']) for r in requests)
+    if ids != list(range(1, len(requests) + 1)):
+        raise RuntimeError('Requests do not complete exactly once (ids are not 1..N)')
+    if any(int(r['image_index']) != (int(r['request_id']) - 1) % images for r in requests):
+        raise RuntimeError('Image order broken')
+    log_text = log_path.read_text(encoding='utf-8', errors='replace')
+    counts = {}
+    for key, label in (('scheduled', 'Scheduled requests'), ('generated', 'Generated requests')):
+        match = re.search(label + r': (\d+)', log_text)
+        counts[key] = int(match.group(1)) if match else None
+    if counts['generated'] != len(requests):
+        raise RuntimeError('Generated {} requests but {} completed'.format(
+            counts['generated'], len(requests)))
+
     measured_utilization = []
     with raw_path.open(newline='', encoding='utf-8') as raw_file, samples_path.open(
         'w', newline='', encoding='utf-8'
@@ -167,6 +192,20 @@ def main():
         'mean_sampled_gpu_util_percent': statistics.mean(measured_utilization),
         'max_sampled_gpu_util_percent': max(measured_utilization),
         'completed_requests': len(requests),
+        'scheduled_requests': counts['scheduled'],
+        'generated_requests': counts['generated'],
+        'measurement_seconds': (measure_end - measure_start).total_seconds(),
+        'separate_from_comparison_runs': True,
+        'purpose': 'GPU utilization of one run per policy and repeat; collected separately '
+                   'from the 84 performance runs in results/resnet50/comparison and not '
+                   'measured at the same time as them',
+        'samples_scope': 'only samples between the host-received MEASURE_START and '
+                         'MEASURE_END markers; model loading, warm-up and calibration are '
+                         'labelled initialization_or_warmup in gpu_samples.csv and excluded',
+        'cli_options': extra,
+        'git_commit': git('rev-parse', 'HEAD'),
+        'git_dirty': bool(git('status', '--porcelain', '--untracked-files=no')),
+        'executable_sha256': hashlib.sha256(EXE.read_bytes()).hexdigest(),
         'slo_met_requests': met,
         'slo_attainment_percent': 100.0 * met / len(requests),
         'calibration_csv': request_path.name + '.service_times.csv',
