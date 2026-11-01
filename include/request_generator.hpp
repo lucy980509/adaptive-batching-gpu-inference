@@ -8,5 +8,6 @@
 void generate_requests(
     RequestQueue& request_queue,
     const std::vector<float>& input_data,
-    const WorkloadConfig& config
+    const WorkloadConfig& config,
+    std::chrono::milliseconds latency_target = SloConfig{}.latency_target
 );

@@ -2,22 +2,31 @@
 
 #include <chrono>
 #include <iostream>
+#include <iomanip>
 
 MetricsLogger::MetricsLogger(
     const std::string& csv_path,
     const WorkloadConfig& workload_config,
-    int configured_batch_size
+    int configured_batch_size,
+    const std::string& policy_mode,
+    const SloConfig& target_config
 )
     : metrics_file(csv_path),
       config(workload_config),
-      batch_size(configured_batch_size) {
+      batch_size(configured_batch_size),
+      mode(policy_mode),
+      slo_config(target_config) {
 
     if (metrics_file.is_open()) {
+        metrics_file << std::setprecision(12);
         metrics_file
             << "workload,target_rps,duration_seconds,"
             << "burst_on_ms,burst_off_ms,max_batch_size,actual_batch_size,"
             << "request_id,queue_wait_ms,service_time_ms,e2e_latency_ms,"
-            << "arrival_offset_ms,generation_lag_ms\n";
+            << "arrival_offset_ms,generation_lag_ms,"
+            << "mode,slo_target_ms,slo_required_percent,safety_margin_ms,"
+            << "deadline_offset_ms,estimated_service_ms,"
+            << "slack_at_service_start_ms,slo_met\n";
     }
 }
 
@@ -59,6 +68,21 @@ void MetricsLogger::record_batch(const std::vector<Request>& batch) {
                 request.arrival_time - request.scheduled_arrival_time
             ).count();
 
+        const double deadline_offset_ms =
+            std::chrono::duration<double, std::milli>(
+                request.deadline - first_arrival
+            ).count();
+
+        const double slack_ms =
+            std::chrono::duration<double, std::milli>(
+                request.deadline - request.start_service_time
+            ).count() - request.estimated_service_ms;
+
+        const bool slo_met = request.finish_time <= request.deadline;
+        if (slo_met) {
+            ++slo_met_requests;
+        }
+
         metrics_file
             << config.name << ','
             << config.requests_per_second << ','
@@ -72,7 +96,15 @@ void MetricsLogger::record_batch(const std::vector<Request>& batch) {
             << service_ms << ','
             << total_ms << ','
             << arrival_offset_ms << ','
-            << generation_lag_ms << '\n';
+            << generation_lag_ms << ','
+            << mode << ','
+            << slo_config.latency_target.count() << ','
+            << slo_config.target_attainment_percent << ','
+            << slo_config.safety_margin.count() << ','
+            << deadline_offset_ms << ','
+            << request.estimated_service_ms << ','
+            << slack_ms << ','
+            << (slo_met ? 1 : 0) << '\n';
     }
 }
 
@@ -95,4 +127,20 @@ void MetricsLogger::print_summary() const {
                   << completed_requests / elapsed_seconds
                   << " requests/sec\n";
     }
+
+    const double attainment_percent =
+        100.0 * slo_met_requests / completed_requests;
+
+    std::cout << "SLO target: " << slo_config.latency_target.count()
+              << " ms\n";
+    std::cout << "SLO met requests: " << slo_met_requests
+              << '/' << completed_requests << '\n';
+    std::cout << "SLO attainment: " << attainment_percent << "%\n";
+    std::cout << "SLO violations: "
+              << completed_requests - slo_met_requests << '\n';
+    std::cout << "SLO requirement: "
+              << slo_config.target_attainment_percent << "%\n";
+    std::cout << "SLO status: "
+              << (attainment_percent >= slo_config.target_attainment_percent
+                  ? "PASS" : "FAIL") << '\n';
 }

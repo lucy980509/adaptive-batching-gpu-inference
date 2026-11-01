@@ -7,7 +7,8 @@
 void generate_requests(
     RequestQueue& request_queue,
     const std::vector<float>& input_data,
-    const WorkloadConfig& config
+    const WorkloadConfig& config,
+    std::chrono::milliseconds latency_target
 ) {
     const TimePoint start = Clock::now();
 
@@ -34,7 +35,7 @@ void generate_requests(
                 break;
             }
 
-            Request req(request_id++);
+            Request req(request_id++, latency_target);
             req.scheduled_arrival_time = next_arrival;
             req.input = input_data;
             request_queue.push(req);

@@ -1,0 +1,23 @@
+{
+  "workload": "high",
+  "mode": "static",
+  "configured_batch_size": 1,
+  "max_wait_ms": null,
+  "slo_target_ms": 20.0,
+  "safety_margin_ms": 10.0,
+  "slo_required_percent": 95.0,
+  "repeat": 1,
+  "gpu_index": 0,
+  "query_interval_ms": 100,
+  "measurement_start_host": "2026-11-01T16:17:49.594254",
+  "measurement_end_host": "2026-11-01T16:17:59.600297",
+  "valid_measurement_samples": 92,
+  "gpu_measurement_enabled": true,
+  "scope": "whole_gpu",
+  "mean_sampled_gpu_util_percent": 3.5652173913043477,
+  "max_sampled_gpu_util_percent": 16.0,
+  "completed_requests": 1998,
+  "slo_met_requests": 1998,
+  "slo_attainment_percent": 100.0,
+  "calibration_csv": "requests.csv.service_times.csv"
+}

@@ -1,8 +1,8 @@
 # Adaptive Batching for GPU Inference
 
-A C++17 GPU inference serving experiment comparing static batching and two queue-aware adaptive policies.
+A C++17 GPU inference serving experiment comparing static batching, two queue-aware adaptive policies, and a deadline-based SLO-aware policy.
 
-**Status:** Initial implementation, 84-run comparison, GPU monitoring, and result analysis completed.
+**Status:** Initial implementation, 84-run comparison, GPU monitoring, and result analysis completed. The SLO-aware extension (separate 96-run comparison and four-policy GPU monitoring) is also completed. A ResNet-50 extension is planned and **not yet implemented**.
 
 ## Overview
 
@@ -37,8 +37,11 @@ The same preprocessed image is copied into each request. This is an in-process s
 | Static | Fixed size: 1, 4, 8, 16, or 32 | Full batch or queue closure |
 | Adaptive wait | Queue-based target, starting at up to 4 and increasing to a maximum of 32 | Target reached, oldest request reaches the configured timeout, or queue closure |
 | Adaptive immediate | Selects a supported size from queued requests, up to 32 | No intentional accumulation wait |
+| SLO-aware | Same queue-based target as Adaptive wait, up to 32 | Target reached, latest dispatch time (`deadline - estimated service time - safety margin`), or queue closure |
 
 Adaptive wait uses a configured maximum wait of **10 ms**. This is not a hard latency guarantee: thread scheduling and other server work can delay dispatch.
+
+The SLO-aware policy was added later and is evaluated in a separate comparison (see [SLO-aware Extension](#slo-aware-extension)). The 84-run results below were collected before it existed and do not include it.
 
 ## Workloads
 
@@ -200,6 +203,59 @@ Supported relative to large fixed batches, with an important qualification: time
 
 Not established. The workload named “high” represents 200 requests/s in this experiment; it does not demonstrate system saturation.
 
+## SLO-aware Extension
+
+This extension adds request deadlines, calibration-based service-time estimates, and an SLO-aware batching mode (`slo`). It was evaluated in a **separate 96-run comparison**, independent of the 84-run comparison above.
+
+- Per-request latency target: **20 ms** (actual arrival to inference completion); a run passes when at least **95%** of its requests meet their deadlines.
+- SLO-aware safety margin: **10 ms**. The margin was changed from an initial 2 ms after a failed low-workload smoke test, then fixed for all 96 runs. This is exploratory policy development, not an untouched holdout evaluation. `docs/slo_policy.md` is the pre-experiment definition and still lists the original 2 ms margin.
+- Design: [docs/slo_policy.md](docs/slo_policy.md). Results: [docs/slo_results.md](docs/slo_results.md). GPU measurements: [docs/slo_gpu_results.md](docs/slo_gpu_results.md).
+
+### 96-Run SLO Comparison
+
+Eight policies (Static 1 / 4 / 8 / 16 / 32, Adaptive wait, Adaptive immediate, SLO-aware) × four workloads × three repeats. All 96 runs have GPU monitoring disabled.
+
+![SLO attainment across policies](results/slo_analysis/slo_attainment.png)
+
+Mean of three run-level SLO attainment percentages:
+
+| Workload | Static 1 | Adaptive wait | Adaptive immediate | SLO-aware | SLO-aware passing runs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Low | 100.00% | 96.67% | 100.00% | 100.00% | 3/3 |
+| Medium | 100.00% | 99.83% | 100.00% | 100.00% | 3/3 |
+| High | 100.00% | 91.68% | 100.00% | 92.16% | 0/3 |
+| Bursty | 100.00% | 91.68% | 100.00% | 90.92% | 0/3 |
+
+**The SLO-aware policy failed the 95% requirement in all three High and all three Bursty runs.** Static 1 and Adaptive immediate met it in every run of every workload, so this experiment does not demonstrate an advantage of SLO-aware scheduling over immediate dispatch. Static 4 passed High and Bursty but failed Low and Medium, showing that a fixed batch size can suit one load and not another.
+
+![Focused P95 comparison with SLO-aware](results/slo_analysis/slo_p95_focus.png)
+
+Mean run-level P95 latency (not pooled percentiles):
+
+| Workload | Static 1 | Adaptive wait | Adaptive immediate | SLO-aware |
+| --- | ---: | ---: | ---: | ---: |
+| Low | 2.090 ms | 18.180 ms | 1.863 ms | 17.806 ms |
+| Medium | 1.948 ms | 17.732 ms | 1.917 ms | 17.674 ms |
+| High | 4.402 ms | 22.318 ms | 5.077 ms | 22.174 ms |
+| Bursty | 4.297 ms | 22.543 ms | 4.393 ms | 23.013 ms |
+
+SLO-aware behaved much like a short accumulation timeout here, and waiting did not produce a demonstrated throughput benefit at these offered loads. Other charts (all-policy P95, throughput) are in `results/slo_analysis/`.
+
+### GPU Monitoring for the Four Policies
+
+![GPU utilization, SLO session](results/slo_analysis/slo_gpu_high.png)
+
+These are **High-workload runs, one monitored run per policy**, collected separately from the 96 benchmark runs. They must not be treated as GPU measurements of those runs.
+
+| Policy | Mean sampled GPU utilization | Maximum sampled | SLO attainment in this run |
+| --- | ---: | ---: | ---: |
+| Static 1 | 3.57% | 16% | 100.00% |
+| Adaptive wait | 2.10% | 10% | 90.05% |
+| Adaptive immediate | 3.22% | 12% | 100.00% |
+| SLO-aware | 1.67% | 9% | 93.29% |
+
+Utilization is low for every policy, consistent with no sustained GPU saturation. With one run per policy, these numbers do not establish a reliable ranking. In the SLO-aware monitored run, 133 of 134 deadline violations had positive estimated slack at service start, so the fixed warm-up-derived service estimate did not guarantee timely completion.
+
 ## Build and Run
 
 ### Prerequisites
@@ -248,6 +304,10 @@ build\Release\p3_inference.exe high adaptive 32 metrics_adaptive_test.csv
 build\Release\p3_inference.exe high adaptive_immediate 32 metrics_high_immediate_test.csv
 ```
 
+```bat
+build\Release\p3_inference.exe high slo 32 metrics_high_slo_test.csv
+```
+
 Arguments:
 
 ```text
@@ -255,12 +315,14 @@ p3_inference.exe <workload> <mode> <batch_size> <csv_path>
 ```
 
 - Workload: `low`, `medium`, `high`, `bursty`
-- Mode: `static`, `adaptive`, `adaptive_immediate`
+- Mode: `static`, `adaptive`, `adaptive_immediate`, `slo`
 - Batch size: `1`, `4`, `8`, `16`, `32`
 
-Run from the repository root so relative model and image paths resolve correctly.
+Every run also writes `<csv_path>.service_times.csv` (the calibration estimate for each batch size). Run from the repository root so relative model and image paths resolve correctly.
 
 ### Run the Comparison Experiments
+
+84-run comparison:
 
 ```bat
 python scripts\run_experiments.py
@@ -268,14 +330,28 @@ python scripts\run_immediate_experiments.py
 python scripts\merge_results.py
 ```
 
+96-run SLO comparison (writes to `results/slo_comparison/`; refuses to overwrite an existing output directory):
+
+```bat
+python scripts\run_slo_experiments.py
+```
+
 Existing result directories may need to be moved before rerunning scripts that prevent overwriting previous experiments.
 
 ### Monitor GPU Utilization
+
+84-run session (writes to `results/gpu/`):
 
 ```bat
 python scripts\measure_gpu.py high static 1
 python scripts\measure_gpu.py high adaptive 32
 python scripts\measure_gpu.py high adaptive_immediate 32
+```
+
+The updated `scripts\measure_gpu.py` writes to `results/gpu_slo/` and also accepts `slo`. The four-policy session in `results/gpu_slo/` was collected with it:
+
+```bat
+python scripts\measure_gpu.py high slo 32
 ```
 
 For another run, select an unused run number:
@@ -289,9 +365,11 @@ python scripts\measure_gpu.py high adaptive_immediate 32 --run 3
 ```bat
 python -m pip install --user matplotlib numpy
 python scripts\plot_results.py
+python scripts\plot_slo_results.py
+python scripts\plot_slo_gpu.py
 ```
 
-Figures are written to `results/analysis/` as PNG and SVG files. This step does not rerun inference.
+`plot_results.py` writes to `results/analysis/`; the SLO scripts write PNG and SVG files and `slo_gpu_summary.csv` to `results/slo_analysis/`. These steps do not rerun inference.
 
 ## Repository Layout
 
@@ -305,9 +383,16 @@ Figures are written to `results/analysis/` as PNG and SVG files. This step does 
 | `results/comparison/` | Original 72-run comparison |
 | `results/immediate/` | Additional 12 immediate-policy runs |
 | `results/combined/` | Combined summaries |
-| `results/gpu/` | Separate GPU-monitoring outputs |
-| `results/analysis/` | Figures and derived GPU summary |
+| `results/gpu/` | Separate GPU-monitoring outputs (84-run session) |
+| `results/analysis/` | Figures and derived GPU summary (84-run session) |
+| `results/slo_comparison/` | 96-run SLO comparison (request CSVs, calibration CSVs, summaries) |
+| `results/gpu_slo/` | Four monitored High-workload runs, one per policy |
+| `results/slo_analysis/` | SLO comparison and GPU figures and summary |
+| `tests/` | `test_slo.cpp` (not part of the CMake build) |
 | `docs/results.md` | Detailed analysis and measurement limitations |
+| `docs/slo_policy.md` | Pre-experiment SLO policy definition |
+| `docs/slo_results.md` | 96-run SLO comparison analysis |
+| `docs/slo_gpu_results.md` | GPU monitoring after the SLO extension |
 
 ## Limitations
 
@@ -320,11 +405,13 @@ Figures are written to `results/analysis/` as PNG and SVG files. This step does 
 - CSV writing can affect subsequent dispatch timing.
 - Preprocessing is performed before request generation and is excluded from serving latency.
 - Throughput uses the first-arrival-to-last-completion interval, which can affect comparisons under short or bursty workloads.
-- GPU utilization was measured only for three high-workload configurations, once each.
+- GPU utilization was measured only for High-workload configurations, once per policy (three in the 84-run session, four after the SLO extension), and never during the benchmark runs themselves.
+- The SLO target (20 ms) and margin (10 ms) are experimental choices, not a production requirement; the margin was adjusted once after a smoke test.
+- The SLO-aware policy is heuristic. It failed the 95% requirement on High and Bursty, and its fixed service-time estimate did not ensure timely completion.
 - The pipeline reuses one input image and does not include network serving.
 - A precise CPU, transfer, or GPU bottleneck has not been established.
 
-See [the detailed analysis](docs/day13_results.md) for further discussion.
+See [the detailed analysis](docs/results.md) and [the SLO analysis](docs/slo_results.md) for further discussion.
 
 ## Connection to Previous Projects
 
@@ -341,11 +428,9 @@ This implementation is a small CNN serving experiment, not a reproduction of an 
 
 ## Future Work
 
-- Define an explicit latency SLO.
-- Add request deadlines and slack estimates.
-- Implement an SLO-aware batching policy.
-- Compare Static, Adaptive, and SLO-aware scheduling.
+- Add ResNet-50 (ImageNet) alongside the wafer CNN to compare policies under a more compute-intensive model. Offered load, maximum batch size, and SLO for that model are to be chosen after baseline performance measurement. Planned, not implemented.
 - Evaluate higher offered loads to investigate saturation.
+- Investigate service-time estimation error in the SLO-aware policy.
 
 ## Completion Status
 
@@ -360,4 +445,7 @@ This implementation is a small CNN serving experiment, not a reproduction of an 
 - [x] Separate GPU monitoring
 - [x] Nsight Systems inspection
 - [x] Graphs and result analysis
-- [ ] SLO-aware scheduling extension
+- [x] Request deadlines, service-time calibration, and SLO-aware policy
+- [x] 96-run SLO comparison (SLO-aware failed High and Bursty)
+- [x] Separate four-policy GPU monitoring (High, one run per policy)
+- [ ] ResNet-50 extension (planned)

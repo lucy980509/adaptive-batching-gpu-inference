@@ -35,6 +35,7 @@ add_executable(p3_inference
     src/request_generator.cpp
     src/static_batcher.cpp
     src/adaptive_batcher.cpp
+    src/slo_batcher.cpp
     src/metrics.cpp
 )
 
