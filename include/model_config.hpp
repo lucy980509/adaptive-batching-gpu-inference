@@ -2,11 +2,10 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <stdexcept>
 #include <string>
 
-// Everything the serving code needs to know about one model.
-// The ONNX input is expected to be float32 with shape [N, channels, height, width].
+// Input specification of the served model. The ONNX input is expected to be
+// float32 with shape [N, channels, height, width] and a dynamic batch axis.
 struct ModelConfig {
     std::string name;
     std::wstring model_path;
@@ -19,14 +18,7 @@ struct ModelConfig {
     }
 };
 
-inline ModelConfig get_model_config(const std::string& name) {
-    if (name == "wafer") {
-        return {"wafer", L"models/wafer_fault_cnn.onnx", 1, 24, 24};
-    }
-
-    if (name == "resnet50") {
-        return {"resnet50", L"models/resnet50/resnet50_v2_fp32.onnx", 3, 224, 224};
-    }
-
-    throw std::invalid_argument("Unknown model: " + name);
+// ResNet-50 (torchvision IMAGENET1K_V2) exported by scripts/prepare_resnet50.py.
+inline ModelConfig resnet50_model_config() {
+    return {"resnet50", L"models/resnet50/resnet50_v2_fp32.onnx", 3, 224, 224};
 }

@@ -24,8 +24,8 @@ def save(fig, directory, name):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input', type=Path, default=ROOT / 'results' / 'slo_comparison')
-    parser.add_argument('--output', type=Path, default=ROOT / 'results' / 'slo_analysis')
+    parser.add_argument('--input', type=Path, default=ROOT / 'results' / 'resnet50' / 'policy_comparison')
+    parser.add_argument('--output', type=Path, default=ROOT / 'results' / 'resnet50' / 'analysis')
     args = parser.parse_args()
     with (args.input / 'comparison.csv').open(newline='', encoding='utf-8-sig') as f:
         comparison = list(csv.DictReader(f))

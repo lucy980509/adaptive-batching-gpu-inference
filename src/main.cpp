@@ -1,5 +1,4 @@
 #include "../include/request_queue.hpp"
-#include "../include/preprocess.hpp"
 #include "../include/inference_engine.hpp"
 #include "../include/workload.hpp"
 #include "../include/request_generator.hpp"
@@ -12,23 +11,57 @@
 #include "../include/model_config.hpp"
 #include "../include/dataset.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
 
+namespace {
+
+bool is_supported_batch_size(const std::string& text) {
+    return text == "1" || text == "4" || text == "8" ||
+           text == "16" || text == "32";
+}
+
+// Builds `size` requests from the first `size` prepared ImageNet images.
+// The images and their order are fixed, so every run sees the same input.
+std::vector<Request> make_fixed_batch(
+    const ModelConfig& model,
+    std::size_t size
+) {
+    const std::vector<std::vector<float>> images = read_prepared_images(
+        kPreparedImagePath, kPreparedImageCount,
+        model.input_elements(), 0, size
+    );
+
+    std::vector<Request> batch;
+
+    for (std::size_t i = 0; i < size; ++i) {
+        Request req(i);
+        req.input = images[i];
+        batch.push_back(req);
+    }
+
+    return batch;
+}
+
+}  // namespace
+
 int main(int argc, char* argv[]) {
-    if (argc != 5 && argc != 6) {
+    if (argc != 5) {
         std::cerr
             << "Usage: p3_inference.exe "
             << "<workload> <static|adaptive|adaptive_immediate|slo> "
-            << "<batch_size> <csv_path> [wafer|resnet50]\n"
-            << "       p3_inference.exe <workload> model_check <1|4> <csv_path> "
-            << "[wafer|resnet50]   (model check; resnet50 writes logits to csv_path)\n";
+            << "<batch_size> <csv_path>\n"
+            << "       p3_inference.exe <any> model_check <1|4> <logits_path>\n"
+            << "       p3_inference.exe <any> batch_profile "
+            << "<1|4|8|16|32> <csv_path>\n";
         return 1;
     }
 
@@ -36,68 +69,37 @@ int main(int argc, char* argv[]) {
     const std::string mode = argv[2];
     const std::string batch_argument = argv[3];
     const std::string csv_path = argv[4];
-    const std::string model_name = (argc == 6) ? argv[5] : "wafer";
 
     if (mode != "static" &&
         mode != "adaptive" &&
         mode != "adaptive_immediate" &&
         mode != "slo" &&
-        mode != "model_check") {
+        mode != "model_check" &&
+        mode != "batch_profile") {
         std::cerr
-            << "Mode must be static, adaptive, adaptive_immediate, slo "
-            << "or model_check.\n";
+            << "Mode must be static, adaptive, adaptive_immediate, slo, "
+            << "model_check or batch_profile.\n";
         return 1;
     }
 
-    ModelConfig model;
+    const ModelConfig model = resnet50_model_config();
 
-    try {
-        model = get_model_config(model_name);
-    }
-    catch (const std::exception& error) {
-        std::cerr << error.what() << " (use wafer or resnet50)\n";
-        return 1;
-    }
-
-    // Model check: load the model on CUDA and run one batch of 1 or 4. No
-    // workload, calibration, serving loop, or metrics CSV is started.
-    // wafer: synthetic constant input (connection check only).
-    // resnet50: the first images of the prepared ImageNet subset; the logits
-    // are written as raw float32 to <csv_path> so they can be compared with
-    // PyTorch (scripts/verify_resnet_inputs.py). This is the only place the
-    // output is copied; the serving loop never requests it.
+    // Model check: load the model on CUDA and run the first 1 or 4 prepared
+    // images once. The logits are written as raw float32 to <logits_path> so
+    // they can be compared with PyTorch (scripts/verify_resnet_inputs.py).
+    // This is the only place the output is copied; the serving loop and
+    // batch_profile never request it.
     if (mode == "model_check") {
-        if (batch_argument != "1" &&
-            !(batch_argument == "4" && model.name == "resnet50")) {
-            std::cerr << "model_check runs batch size 1 (resnet50: 1 or 4).\n";
+        if (batch_argument != "1" && batch_argument != "4") {
+            std::cerr << "model_check runs batch size 1 or 4.\n";
             return 1;
         }
-
-        const std::size_t check_size = std::stoul(batch_argument);
 
         try {
             InferenceEngine engine(model);
 
-            std::vector<Request> batch;
-
-            if (model.name == "resnet50") {
-                const std::vector<std::vector<float>> images =
-                    read_prepared_images(
-                        kPreparedImagePath, kPreparedImageCount,
-                        model.input_elements(), 0, check_size
-                    );
-
-                for (std::size_t i = 0; i < check_size; ++i) {
-                    Request req(i);
-                    req.input = images[i];
-                    batch.push_back(req);
-                }
-            }
-            else {
-                Request req(0);
-                req.input.assign(model.input_elements(), 0.5f);
-                batch.push_back(req);
-            }
+            std::vector<Request> batch =
+                make_fixed_batch(model, std::stoul(batch_argument));
 
             std::vector<float> output;
             engine.run_batch(batch, &output);
@@ -118,23 +120,19 @@ int main(int argc, char* argv[]) {
                 std::cout << "  image " << n << " top1_index=" << top1 << '\n';
             }
 
-            if (model.name == "resnet50") {
-                std::ofstream logits_file(csv_path, std::ios::binary);
-                logits_file.write(
-                    reinterpret_cast<const char*>(output.data()),
-                    static_cast<std::streamsize>(output.size() * sizeof(float))
-                );
-                if (!logits_file) {
-                    throw std::runtime_error("Cannot write logits: " + csv_path);
-                }
-                std::cout << "Logits written: " << csv_path << '\n'
-                          << "Real prepared ImageNet images; model check only, "
-                          << "not a serving or performance result.\n";
+            std::ofstream logits_file(csv_path, std::ios::binary);
+            logits_file.write(
+                reinterpret_cast<const char*>(output.data()),
+                static_cast<std::streamsize>(output.size() * sizeof(float))
+            );
+
+            if (!logits_file) {
+                throw std::runtime_error("Cannot write logits: " + csv_path);
             }
-            else {
-                std::cout << "Synthetic constant input; connection check only, "
-                          << "not a serving or accuracy result.\n";
-            }
+
+            std::cout << "Logits written: " << csv_path << '\n'
+                      << "Model check only, not a serving or performance "
+                      << "result.\n";
         }
         catch (const std::exception& error) {
             std::cerr << "Model check failed: " << error.what() << '\n';
@@ -144,20 +142,85 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    if (model.name != "wafer") {
-        std::cerr
-            << "Serving with model '" << model.name << "' requires prepared "
-            << "ImageNet input data, which is not available yet. "
-            << "Use model_check to verify model loading only.\n";
+    // Batch profile: sequential batches of the same fixed images, no arriving
+    // traffic. Model loading, image loading and 3 warm-up runs are not timed;
+    // the next 10 runs are timed with the engine's own service-time clock
+    // (batch assembly + tensor setup + session.Run). No logits are copied and
+    // nothing is printed between runs. One batch size per process, so a
+    // failure (for example out of GPU memory) cannot affect another size.
+    if (mode == "batch_profile") {
+        if (!is_supported_batch_size(batch_argument)) {
+            std::cerr << "Batch size must be 1, 4, 8, 16 or 32.\n";
+            return 1;
+        }
+
+        const int warmup_runs = 3;
+        const int measured_runs = 10;
+
+        try {
+            InferenceEngine engine(model);
+
+            std::vector<Request> batch =
+                make_fixed_batch(model, std::stoul(batch_argument));
+
+            for (int run = 0; run < warmup_runs; ++run) {
+                engine.run_batch(batch);
+            }
+
+            std::vector<double> service_ms;
+
+            for (int run = 0; run < measured_runs; ++run) {
+                engine.run_batch(batch);
+
+                service_ms.push_back(
+                    std::chrono::duration<double, std::milli>(
+                        batch.front().finish_time -
+                        batch.front().start_service_time
+                    ).count()
+                );
+            }
+
+            std::ofstream profile_file(csv_path);
+
+            if (!profile_file.is_open()) {
+                throw std::runtime_error("Cannot write " + csv_path);
+            }
+
+            profile_file << std::setprecision(12);
+            profile_file << "model,batch_size,run,service_ms\n";
+
+            for (int run = 0; run < measured_runs; ++run) {
+                profile_file << model.name << ',' << batch.size() << ','
+                             << run + 1 << ',' << service_ms[run] << '\n';
+            }
+
+            std::cout << "BATCH_PROFILE_DONE batch=" << batch.size()
+                      << " warmup=" << warmup_runs
+                      << " measured=" << measured_runs << '\n';
+        }
+        catch (const std::exception& error) {
+            std::cerr << "Batch profile failed: " << error.what() << '\n';
+            return 1;
+        }
+
+        return 0;
+    }
+
+    if (!is_supported_batch_size(batch_argument)) {
+        std::cerr << "Batch size must be 1, 4, 8, 16 or 32.\n";
         return 1;
     }
 
-    if (batch_argument != "1" &&
-        batch_argument != "4" &&
-        batch_argument != "8" &&
-        batch_argument != "16" &&
-        batch_argument != "32") {
-        std::cerr << "Batch size must be 1, 4, 8, 16 or 32.\n";
+    // The generator still copies one input into every request. The fixed image
+    // pool with one shared order for all policies is the next step, so serving
+    // is switched off until then instead of reusing a single image.
+    const bool image_pool_connected = false;
+
+    if (!image_pool_connected) {
+        std::cerr
+            << "Serving is disabled until the ImageNet image pool is "
+            << "connected to the request generator. Use model_check or "
+            << "batch_profile.\n";
         return 1;
     }
 
@@ -196,14 +259,13 @@ int main(int argc, char* argv[]) {
 
     InferenceEngine& engine = *engine_holder;
 
-    // Only the wafer model reaches this point (checked above), so its
-    // grayscale 24x24 preprocessing is the correct input.
+    // Placeholder until the image pool exists (unreachable while
+    // image_pool_connected is false): the first prepared image.
     std::vector<float> input_data =
-        preprocess_image("test_images/sample.png");
-
-    if (input_data.empty()) {
-        return 1;
-    }
+        read_prepared_images(
+            kPreparedImagePath, kPreparedImageCount,
+            model.input_elements(), 0, 1
+        )[0];
 
     MetricsLogger metrics(
         csv_path, config, batch_size, mode, slo_config, model.name

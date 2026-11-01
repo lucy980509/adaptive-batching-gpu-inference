@@ -29,7 +29,7 @@ public:
         int configured_batch_size,
         const std::string& policy_mode = "unknown",
         const SloConfig& target_config = SloConfig{},
-        const std::string& model = "wafer"
+        const std::string& model = "resnet50"
     );
 
     bool is_open() const;

@@ -1,0 +1,11 @@
+model,batch_size,run,service_ms
+resnet50,8,1,29.2392
+resnet50,8,2,29.1612
+resnet50,8,3,28.942
+resnet50,8,4,29.1265
+resnet50,8,5,30.4141
+resnet50,8,6,28.9837
+resnet50,8,7,29.0153
+resnet50,8,8,28.9668
+resnet50,8,9,29.566
+resnet50,8,10,29.1076

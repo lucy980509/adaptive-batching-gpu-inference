@@ -78,7 +78,11 @@ int main(int argc, char* argv[]) {
         producer.join();
         require(batch.size() == 2, "Partial batch lost requests");
         require(batch[0].id == 1 && batch[1].id == 2, "FIFO order changed");
-        require(dispatched >= first.deadline - std::chrono::milliseconds(3),
+        // Earliest allowed dispatch: deadline - estimated service time (1 ms
+        // for every size here) - the configured safety margin, with 3 ms of
+        // timer tolerance.
+        require(dispatched >= first.deadline - std::chrono::milliseconds(1) -
+                    config.safety_margin - std::chrono::milliseconds(3),
                 "Batch dispatched before computed slack boundary");
         require(dispatched < first.deadline + std::chrono::milliseconds(100),
                 "Arrival notifications extended the oldest deadline");

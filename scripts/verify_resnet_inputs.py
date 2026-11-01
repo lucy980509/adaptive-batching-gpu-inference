@@ -92,7 +92,7 @@ def run_cpp(images_in_batch):
 
     baseline_memory, _ = gpu_state()
     process = subprocess.Popen(
-        [str(EXE), 'low', 'model_check', str(images_in_batch), str(out_path), 'resnet50'],
+        [str(EXE), 'low', 'model_check', str(images_in_batch), str(out_path)],
         cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         universal_newlines=True, encoding='utf-8', errors='replace')
     peak_memory, peak_util = baseline_memory, 0.0

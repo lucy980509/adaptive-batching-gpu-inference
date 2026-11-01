@@ -17,7 +17,7 @@ The text and formulas in this document are the **initial pre-experiment definiti
 
 - The initial 2 ms margin was tried in a Low-workload smoke test, which failed the 95% requirement.
 - After that observation the margin was adjusted to **10 ms**. This is exploratory policy development, not an untouched holdout evaluation.
-- The 96-run comparison (see [slo_results.md](slo_results.md)) and the four-policy GPU monitoring (see [slo_gpu_results.md](slo_gpu_results.md)) both used the fixed 10 ms margin. The code default in `include/slo_config.hpp` is 10 ms.
+- The earlier wafer-CNN 96-run comparison and its four-policy GPU monitoring used the fixed 10 ms margin. Those results and their analysis documents were removed when the project moved to ResNet-50 and are preserved only in Git history (commit `857c8d8`). The code default in `include/slo_config.hpp` is still 10 ms; it was tuned for the wafer model and must be re-decided for ResNet-50 after the batch profile.
 - Wherever this document says 2 ms (including the `latest_dispatch` formula below), read 10 ms for the reported experiments.
 
 The queue is FIFO, requests use the same budget, and one producer creates them in arrival order. Therefore the front request has the earliest deadline. This implementation is not a heterogeneous-deadline/EDF scheduler.

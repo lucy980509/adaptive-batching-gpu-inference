@@ -5,7 +5,10 @@ import statistics
 import subprocess
 from datetime import datetime
 
-from run_experiments import ROOT, EXE
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+EXE = ROOT / 'build' / 'Release' / 'p3_inference.exe'
 
 
 def main():
@@ -24,7 +27,7 @@ def main():
     name = '{}_{}_b{}_run{}'.format(
         args.workload, args.mode, args.batch_size, args.run
     )
-    output_dir = ROOT / 'results' / 'gpu_slo' / name
+    output_dir = ROOT / 'results' / 'resnet50' / 'gpu' / name
     output_dir.mkdir(parents=True, exist_ok=False)
 
     request_path = output_dir / 'requests.csv'

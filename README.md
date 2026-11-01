@@ -1,24 +1,21 @@
-# Adaptive Batching for GPU Inference
+# Batching Policies for ResNet-50 GPU Inference
 
-A C++17 GPU inference serving experiment comparing static batching, two queue-aware adaptive policies, and a deadline-based SLO-aware policy.
+A C++17 inference-serving experiment that compares four request-batching policies on ResNet-50 with ONNX Runtime and CUDA:
 
-**Status:** Initial implementation, 84-run comparison, GPU monitoring, and result analysis completed. The SLO-aware extension (separate 96-run comparison and four-policy GPU monitoring) is also completed. A ResNet-50 extension is planned and **not yet implemented**.
+- **Static**: fixed batch size
+- **Adaptive wait**: queue-based batch target with a maximum wait
+- **Adaptive immediate**: queue-based batch size without waiting to accumulate
+- **SLO-aware**: dispatch time computed from request deadlines and estimated service time
 
-## Overview
+**Status:** the ResNet-50 model, a fixed 1,000-image ImageNet validation subset, and a per-batch service-time profile are done. **The formal policy comparison has not started.** Request rates, maximum batch size, the SLO, and the safety margin are not decided yet; they will be chosen after looking at the batch profile. The serving loop is disabled until the image pool is connected to the request generator (`p3_inference` exits with a message when asked to serve).
 
-Batching can improve inference efficiency, but waiting to assemble a batch also increases request latency.
+## Background
 
-This project explores that trade-off using a small wafer-defect CNN, ONNX Runtime with CUDA, and four synthetic request workloads.
+The project started with a small wafer-defect CNN. That model is so cheap (about 1.5 ms per request) that batching never beat batch size 1 at the tested loads, so the experiments could not show when batching helps. It was replaced with ResNet-50, whose compute cost makes batching decisions matter. The wafer code, results, and analysis are not kept in the working tree; they remain in Git history (last wafer-era commits: `07052c8` for the first 84-run comparison, `857c8d8` for the SLO-aware extension and its 96-run comparison).
 
-The main finding is that adaptive policies reduced long batch-formation delays relative to large static batches, but did not consistently outperform Static batch 1 at the tested arrival rates.
+## Pipeline
 
-## Research Question
-
-Under what workload conditions does adaptive batching outperform static batching, and how does batch-formation delay affect tail latency, throughput, and GPU utilization?
-
-## Serving Pipeline
-
-A producer thread generates requests and places them in a thread-safe queue. The serving loop collects a batch, runs inference, and records request-level metrics.
+A producer thread generates requests into a thread-safe queue. The serving loop collects a batch with the selected policy, runs inference, and records request-level metrics.
 
 ```mermaid
 flowchart TD
@@ -28,424 +25,103 @@ flowchart TD
     D --> E["Metrics"]
 ```
 
-The same preprocessed image is copied into each request. This is an in-process serving simulation rather than an HTTP or gRPC service.
+This is an in-process serving simulation, not an HTTP or gRPC service.
 
-## Batching Policies
+## Model and Data
 
-| Policy | Batch selection | Dispatch condition |
-| --- | --- | --- |
-| Static | Fixed size: 1, 4, 8, 16, or 32 | Full batch or queue closure |
-| Adaptive wait | Queue-based target, starting at up to 4 and increasing to a maximum of 32 | Target reached, oldest request reaches the configured timeout, or queue closure |
-| Adaptive immediate | Selects a supported size from queued requests, up to 32 | No intentional accumulation wait |
-| SLO-aware | Same queue-based target as Adaptive wait, up to 32 | Target reached, latest dispatch time (`deadline - estimated service time - safety margin`), or queue closure |
+| Item | Value |
+| --- | --- |
+| Model | torchvision ResNet-50, `IMAGENET1K_V2` weights, FP32 |
+| ONNX | `models/resnet50/resnet50_v2_fp32.onnx` (+ `.onnx.data`), dynamic batch axis, input `[N,3,224,224]`, output `[N,1000]` |
+| Data | 1,000 ImageNet validation images (Hugging Face `ILSVRC/imagenet-1k`, revision pinned), chosen with seed 42, preprocessed with the official V2 transform |
+| Prepared file | `data/imagenet/val1000_resnet50_v2_nchw_f32.bin`, float32 little-endian, 602,112,000 bytes |
 
-Adaptive wait uses a configured maximum wait of **10 ms**. This is not a hard latency guarantee: thread scheduling and other server work can delay dispatch.
+The model and data files are not in Git. ImageNet requires accepting its terms on Hugging Face and logging in locally.
 
-The SLO-aware policy was added later and is evaluated in a separate comparison (see [SLO-aware Extension](#slo-aware-extension)). The 84-run results below were collected before it existed and do not include it.
+Verification (4 real images, batch 1 and 4): PyTorch CPU, ONNX Runtime CPU, and the C++ ONNX Runtime CUDA path agree to a maximum absolute difference below 1e-5 (`allclose` with rtol 1e-3, atol 1e-4, same top-1). Labels were checked against the dataset's synset list, and the stored tensors equal the official transform output (`scripts/verify_resnet_inputs.py`).
 
-## Workloads
+## Batch Profile
 
-Each workload has a configured generator duration of 10 seconds.
+Sequential back-to-back batches of the first N prepared images (no arriving traffic), 3 warm-up runs, then 10 timed runs per size, one process per size. Service time covers batch assembly, tensor setup, and `session.Run`. Details and raw timings are in `results/resnet50/batch_profile/`.
 
-| Workload | Target arrival rate | Pattern |
-| --- | ---: | --- |
-| Low | 2 requests/s | Continuous |
-| Medium | 20 requests/s | Continuous |
-| High | 200 requests/s | Continuous |
-| Bursty | 200 requests/s during active periods | 500 ms active, 1500 ms inactive |
+| Batch | Mean | Median | P95* | Observed sequential rate | Sampled GPU memory |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 6.20 ms | 6.18 ms | 6.38 ms | 161 img/s | 344 MiB |
+| 4 | 17.08 ms | 16.87 ms | 18.26 ms | 234 img/s | 342 MiB |
+| 8 | 29.25 ms | 29.12 ms | 30.03 ms | 273 img/s | 598 MiB |
+| 16 | 52.42 ms | 51.85 ms | 54.66 ms | 305 img/s | 600 MiB |
+| 32 | 97.03 ms | 97.04 ms | 99.89 ms | 330 img/s | 1112 MiB |
 
-Bursty traffic has an ideal full-window average of 50 requests/s. Its active-phase target should not be interpreted as a continuous 200 requests/s workload.
-
-Requests use absolute scheduled arrival times. Actual arrival time and generation lag are also recorded because Windows scheduling can cause delayed or grouped arrivals.
+\*P95 of 10 runs is interpolated near the maximum. The rate is batch size divided by mean service time; it is not the throughput of a serving run with arriving requests. Memory is whole-GPU `nvidia-smi` memory sampled about every 100 ms, so it is a sampled value, not an exact peak. One measurement session on a GTX 1660 SUPER (6 GB); no repeats.
 
 ## Environment
 
 | Component | Configuration |
 | --- | --- |
-| GPU | NVIDIA GeForce GTX 1660 SUPER, 6 GB |
-| Operating system | Windows, WDDM |
-| Language | C++17 |
-| Compiler | MSVC, Visual Studio Build Tools 2026 |
-| Build system | CMake |
-| Inference runtime | ONNX Runtime GPU 1.26.0 |
-| CUDA | 12.6 |
-| cuDNN | 9.8 |
-| OpenCV | 4.14.0 |
-| Model precision | FP32 |
-| Model input | `[N, 1, 24, 24]` |
-
-Preprocessing loads a grayscale image, converts it to FP32, divides by its maximum pixel value when positive, and resizes it to 24 × 24 using linear interpolation.
-
-## Metrics
-
-Each request records:
-
-- Queue wait: actual arrival to service start
-- Service time: service start to inference completion
-- End-to-end latency: actual arrival to completion
-- Arrival offset and generation lag
-- Actual batch size
-
-Service time includes batch-input assembly, tensor setup, and `session.Run`. It is not isolated GPU kernel execution time.
-
-Throughput is calculated as:
-
-```text
-completed requests / (last completion time - first actual arrival time)
-```
-
-This interval can differ from the configured 10-second generator duration.
-
-## Experimental Method
-
-The comparison contains:
-
-- Four workloads
-- Five static batch sizes
-- Two adaptive policies
-- Three repeats per configuration
-- **84 runs in total**
-
-Before measured requests, every batch size from 1 through 32 is warmed up three times.
-
-The original Static/Adaptive wait comparison contains 72 runs. Adaptive immediate adds 12 runs collected in a separate session.
-
-Reported latency values are means of run-level percentiles. They are not percentiles calculated by pooling all requests.
-
-## Results
-
-### P95 Latency Across Policies
-
-![P95 latency across all policies](results/analysis/p95_all_policies.png)
-
-The vertical axis uses a logarithmic scale.
-
-### Comparison with Static Batch 1
-
-![Focused P95 comparison](results/analysis/p95_focus.png)
-
-Error bars show sample standard deviation across three runs, not confidence intervals.
-
-| Workload | Static 1 P95 | Adaptive wait P95 | Adaptive immediate P95 |
-| --- | ---: | ---: | ---: |
-| Low | 1.912 ms | 17.871 ms | 1.890 ms |
-| Medium | 1.915 ms | 17.677 ms | 1.790 ms |
-| High | 4.569 ms | 21.031 ms | 5.933 ms |
-| Bursty | 4.152 ms | 21.898 ms | 6.250 ms |
-
-Adaptive immediate was close to Static 1 on low and medium workloads. These small differences do not establish reliable superiority.
-
-Static 1 had lower mean P95 latency on high and bursty workloads.
-
-### Queue Wait
-
-![Mean queue wait](results/analysis/queue_wait.png)
-
-Large static batches created substantial waiting under sparse arrivals.
-
-For example, Low generated only 20 requests, fewer than Static 32 required for a full batch. Requests waited until queue closure, producing a P95 of approximately **9.53 seconds**. Adaptive wait reduced this to approximately **17.87 ms**.
-
-This comparison includes both batch-selection and timeout differences.
-
-### Arrival Rate and Throughput
-
-![Arrival rate, P95 latency, and throughput](results/analysis/arrival_rate_metrics.png)
-
-At the high workload, Static 1, Adaptive wait, and Adaptive immediate all completed approximately 200 requests/s.
-
-These values follow the offered load. They do not establish the system's maximum processing capacity or a throughput advantage from batching.
-
-Bursty is excluded from the continuous arrival-rate curves because its duty cycle differs.
-
-### GPU Monitoring
-
-![GPU utilization under high workload](results/analysis/gpu_high.png)
-
-GPU monitoring was performed in separate high-workload executions.
-
-| Policy | Mean sampled GPU utilization | Maximum sampled GPU utilization |
-| --- | ---: | ---: |
-| Static 1 | 2.50% | 10% |
-| Adaptive wait | 1.29% | 9% |
-| Adaptive immediate | 2.64% | 12% |
-
-These are single monitored runs per policy, not GPU measurements from all 84 benchmark runs.
-
-`nvidia-smi` was polled every 100 ms. Measurements describe the whole GPU and use the device's rolling utilization metric.
-
-The results are consistent with low GPU activity at the tested load. They do not establish a reliable utilization ranking between policies.
-
-### Nsight Systems
-
-Nsight Systems confirmed CUDA kernel execution and visible gaps between kernel activity.
-
-One selected cuDNN convolution kernel took **13.216 μs**. This is one kernel's execution time rather than full-model inference latency.
-
-Application queue waits were not explicitly annotated, so the gaps cannot be attributed to a single source of delay.
-
-## Interpretation
-
-- Adaptive policies reduced long waits relative to large fixed batches.
-- Intentional batch accumulation increased latency at the tested loads without a demonstrated throughput benefit.
-- Immediate dispatch avoided most accumulation delay but did not consistently beat Static batch 1.
-- Sustained GPU saturation was not observed in the monitored high-workload runs.
-- A workload regime where adaptive batching outperforms Static 1 has not yet been demonstrated.
-
-The experiment shows why batching decisions must account for workload intensity and waiting costs.
-
-## Initial Hypotheses
-
-**H1: Adaptive batching reduces tail latency relative to large static batches under low or bursty traffic.**
-
-Supported relative to large fixed batches, with an important qualification: timeout behavior also differs between the policies.
-
-**H2: The benefit of adaptation diminishes under sustained high load.**
-
-Not established. The workload named “high” represents 200 requests/s in this experiment; it does not demonstrate system saturation.
-
-## SLO-aware Extension
-
-This extension adds request deadlines, calibration-based service-time estimates, and an SLO-aware batching mode (`slo`). It was evaluated in a **separate 96-run comparison**, independent of the 84-run comparison above.
-
-- Per-request latency target: **20 ms** (actual arrival to inference completion); a run passes when at least **95%** of its requests meet their deadlines.
-- SLO-aware safety margin: **10 ms**. The margin was changed from an initial 2 ms after a failed low-workload smoke test, then fixed for all 96 runs. This is exploratory policy development, not an untouched holdout evaluation. `docs/slo_policy.md` is the pre-experiment definition and still lists the original 2 ms margin.
-- Design: [docs/slo_policy.md](docs/slo_policy.md). Results: [docs/slo_results.md](docs/slo_results.md). GPU measurements: [docs/slo_gpu_results.md](docs/slo_gpu_results.md).
-
-### 96-Run SLO Comparison
-
-Eight policies (Static 1 / 4 / 8 / 16 / 32, Adaptive wait, Adaptive immediate, SLO-aware) × four workloads × three repeats. All 96 runs have GPU monitoring disabled.
-
-![SLO attainment across policies](results/slo_analysis/slo_attainment.png)
-
-Mean of three run-level SLO attainment percentages:
-
-| Workload | Static 1 | Adaptive wait | Adaptive immediate | SLO-aware | SLO-aware passing runs |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Low | 100.00% | 96.67% | 100.00% | 100.00% | 3/3 |
-| Medium | 100.00% | 99.83% | 100.00% | 100.00% | 3/3 |
-| High | 100.00% | 91.68% | 100.00% | 92.16% | 0/3 |
-| Bursty | 100.00% | 91.68% | 100.00% | 90.92% | 0/3 |
-
-**The SLO-aware policy failed the 95% requirement in all three High and all three Bursty runs.** Static 1 and Adaptive immediate met it in every run of every workload, so this experiment does not demonstrate an advantage of SLO-aware scheduling over immediate dispatch. Static 4 passed High and Bursty but failed Low and Medium, showing that a fixed batch size can suit one load and not another.
-
-![Focused P95 comparison with SLO-aware](results/slo_analysis/slo_p95_focus.png)
-
-Mean run-level P95 latency (not pooled percentiles):
-
-| Workload | Static 1 | Adaptive wait | Adaptive immediate | SLO-aware |
-| --- | ---: | ---: | ---: | ---: |
-| Low | 2.090 ms | 18.180 ms | 1.863 ms | 17.806 ms |
-| Medium | 1.948 ms | 17.732 ms | 1.917 ms | 17.674 ms |
-| High | 4.402 ms | 22.318 ms | 5.077 ms | 22.174 ms |
-| Bursty | 4.297 ms | 22.543 ms | 4.393 ms | 23.013 ms |
-
-SLO-aware behaved much like a short accumulation timeout here, and waiting did not produce a demonstrated throughput benefit at these offered loads. Other charts (all-policy P95, throughput) are in `results/slo_analysis/`.
-
-### GPU Monitoring for the Four Policies
-
-![GPU utilization, SLO session](results/slo_analysis/slo_gpu_high.png)
-
-These are **High-workload runs, one monitored run per policy**, collected separately from the 96 benchmark runs. They must not be treated as GPU measurements of those runs.
-
-| Policy | Mean sampled GPU utilization | Maximum sampled | SLO attainment in this run |
-| --- | ---: | ---: | ---: |
-| Static 1 | 3.57% | 16% | 100.00% |
-| Adaptive wait | 2.10% | 10% | 90.05% |
-| Adaptive immediate | 3.22% | 12% | 100.00% |
-| SLO-aware | 1.67% | 9% | 93.29% |
-
-Utilization is low for every policy, consistent with no sustained GPU saturation. With one run per policy, these numbers do not establish a reliable ranking. In the SLO-aware monitored run, 133 of 134 deadline violations had positive estimated slack at service start, so the fixed warm-up-derived service estimate did not guarantee timely completion.
+| GPU | NVIDIA GeForce GTX 1660 SUPER, 6 GB (Windows, WDDM) |
+| Build | C++17, MSVC (Visual Studio Build Tools), CMake |
+| Inference runtime | ONNX Runtime GPU 1.26.0, CUDA 12.6, cuDNN 9.8 |
+| Python (data/model preparation) | 3.12 environment `.venv-resnet`, versions in `scripts/requirements-resnet.txt` |
 
 ## Build and Run
 
-### Prerequisites
-
-Install:
-
-- Visual Studio Build Tools with C++ support
-- CMake
-- OpenCV
-- ONNX Runtime GPU
-- Compatible CUDA and cuDNN libraries
-- Python for experiment and analysis scripts
-
-Update the local dependency paths in `CMakeLists.txt` before building.
-
-Required input files:
-
-```text
-models/wafer_fault_cnn.onnx
-models/wafer_fault_cnn.onnx.data
-test_images/sample.png
-```
-
-Both ONNX files are required because the model uses external tensor data.
-
-### Build
-
-Run from the repository root:
+Update the dependency paths at the top of `CMakeLists.txt`, then from the repository root:
 
 ```bat
 cmake -S . -B build
 cmake --build build --config Release
 ```
 
-### Run One Configuration
+Prepare the model and data once (see `scripts/requirements-resnet.txt` for the environment):
 
 ```bat
-build\Release\p3_inference.exe high static 1 metrics_static_test.csv
+.venv-resnet\Scripts\python.exe scripts\prepare_resnet50.py
+.venv-resnet\Scripts\hf.exe auth login
+.venv-resnet\Scripts\python.exe scripts\prepare_imagenet_subset.py
+.venv-resnet\Scripts\python.exe scripts\verify_resnet_inputs.py
 ```
+
+Measure the batch profile (runs `batch_profile` once per batch size):
 
 ```bat
-build\Release\p3_inference.exe high adaptive 32 metrics_adaptive_test.csv
+python scripts\profile_batches.py
 ```
 
-```bat
-build\Release\p3_inference.exe high adaptive_immediate 32 metrics_high_immediate_test.csv
-```
-
-```bat
-build\Release\p3_inference.exe high slo 32 metrics_high_slo_test.csv
-```
-
-Arguments:
+Command line:
 
 ```text
-p3_inference.exe <workload> <mode> <batch_size> <csv_path>
+p3_inference.exe <workload> <static|adaptive|adaptive_immediate|slo> <batch_size> <csv_path>
+p3_inference.exe <any> model_check <1|4> <logits_path>
+p3_inference.exe <any> batch_profile <1|4|8|16|32> <csv_path>
 ```
 
-- Workload: `low`, `medium`, `high`, `bursty`
-- Mode: `static`, `adaptive`, `adaptive_immediate`, `slo`
-- Batch size: `1`, `4`, `8`, `16`, `32`
-
-Every run also writes `<csv_path>.service_times.csv` (the calibration estimate for each batch size). Run from the repository root so relative model and image paths resolve correctly.
-
-### Run the Comparison Experiments
-
-84-run comparison:
-
-```bat
-python scripts\run_experiments.py
-python scripts\run_immediate_experiments.py
-python scripts\merge_results.py
-```
-
-96-run SLO comparison (writes to `results/slo_comparison/`; refuses to overwrite an existing output directory):
-
-```bat
-python scripts\run_slo_experiments.py
-```
-
-Existing result directories may need to be moved before rerunning scripts that prevent overwriting previous experiments.
-
-### Monitor GPU Utilization
-
-84-run session (writes to `results/gpu/`):
-
-```bat
-python scripts\measure_gpu.py high static 1
-python scripts\measure_gpu.py high adaptive 32
-python scripts\measure_gpu.py high adaptive_immediate 32
-```
-
-The updated `scripts\measure_gpu.py` writes to `results/gpu_slo/` and also accepts `slo`. The four-policy session in `results/gpu_slo/` was collected with it:
-
-```bat
-python scripts\measure_gpu.py high slo 32
-```
-
-For another run, select an unused run number:
-
-```bat
-python scripts\measure_gpu.py high adaptive_immediate 32 --run 3
-```
-
-### Regenerate Figures
-
-```bat
-python -m pip install --user matplotlib numpy
-python scripts\plot_results.py
-python scripts\plot_slo_results.py
-python scripts\plot_slo_gpu.py
-```
-
-`plot_results.py` writes to `results/analysis/`; the SLO scripts write PNG and SVG files and `slo_gpu_summary.csv` to `results/slo_analysis/`. These steps do not rerun inference.
+Run from the repository root so relative paths resolve. Serving modes exit with a message until the image pool is connected. Scheduler logic is covered by `tests/test_slo.cpp`, a dependency-free test that is not part of the CMake build; compile it with the queue, batcher, metrics, and generator sources and pass a temporary CSV path as its argument.
 
 ## Repository Layout
 
 | Path | Purpose |
 | --- | --- |
-| `include/` | Request types, queue, and component interfaces |
-| `src/` | Generator, batching policies, inference, metrics, and main |
-| `models/` | ONNX model and external tensor data |
-| `test_images/` | Sample input image |
-| `scripts/` | Experiments, GPU monitoring, and plotting |
-| `results/comparison/` | Original 72-run comparison |
-| `results/immediate/` | Additional 12 immediate-policy runs |
-| `results/combined/` | Combined summaries |
-| `results/gpu/` | Separate GPU-monitoring outputs (84-run session) |
-| `results/analysis/` | Figures and derived GPU summary (84-run session) |
-| `results/slo_comparison/` | 96-run SLO comparison (request CSVs, calibration CSVs, summaries) |
-| `results/gpu_slo/` | Four monitored High-workload runs, one per policy |
-| `results/slo_analysis/` | SLO comparison and GPU figures and summary |
-| `tests/` | `test_slo.cpp` (not part of the CMake build) |
-| `docs/results.md` | Detailed analysis and measurement limitations |
-| `docs/slo_policy.md` | Pre-experiment SLO policy definition |
-| `docs/slo_results.md` | 96-run SLO comparison analysis |
-| `docs/slo_gpu_results.md` | GPU monitoring after the SLO extension |
+| `include/`, `src/` | Request queue, generator, Static/Adaptive/SLO batchers, service-time estimator, metrics, inference engine, dataset reader, model config |
+| `scripts/prepare_resnet50.py`, `prepare_imagenet_subset.py`, `verify_resnet_inputs.py` | Model export, data preparation, and input verification |
+| `scripts/profile_batches.py` | Per-batch service-time profile |
+| `scripts/run_slo_experiments.py`, `measure_gpu.py`, `plot_slo_*.py`, `check_slo.py`, `check_metrics.py` | Policy comparison, GPU monitoring, plots, and CSV checks. Reused from the wafer stage and **not yet adapted**: they still assume the old workloads and a 20 ms SLO with a 10 ms margin, to be re-parameterized once the ResNet-50 settings are chosen |
+| `docs/slo_policy.md` | SLO-aware policy definition and margin history |
+| `results/resnet50/` | ResNet-50 measurements |
+| `models/`, `data/` | Model and dataset files (ignored by Git) |
 
-## Limitations
+## Next Steps
 
-- The model is small, and the tested arrival rates did not demonstrate sustained GPU saturation.
-- Only three benchmark repeats were collected per setting.
-- Low workloads contain only 20 requests per run, limiting interpretation of extreme percentiles.
-- Adaptive immediate was tested in a separate session.
-- Windows scheduling affects arrival spacing and timeout wake-ups.
-- Static and adaptive policies differ in timeout behavior as well as batch selection.
-- CSV writing can affect subsequent dispatch timing.
-- Preprocessing is performed before request generation and is excluded from serving latency.
-- Throughput uses the first-arrival-to-last-completion interval, which can affect comparisons under short or bursty workloads.
-- GPU utilization was measured only for High-workload configurations, once per policy (three in the 84-run session, four after the SLO extension), and never during the benchmark runs themselves.
-- The SLO target (20 ms) and margin (10 ms) are experimental choices, not a production requirement; the margin was adjusted once after a smoke test.
-- The SLO-aware policy is heuristic. It failed the 95% requirement on High and Bursty, and its fixed service-time estimate did not ensure timely completion.
-- The pipeline reuses one input image and does not include network serving.
-- A precise CPU, transfer, or GPU bottleneck has not been established.
-
-See [the detailed analysis](docs/results.md) and [the SLO analysis](docs/slo_results.md) for further discussion.
-
-## Connection to Previous Projects
-
-- **P0:** Train a wafer-defect CNN and export it to ONNX.
-- **P1:** Run inference using a standalone C++ pipeline.
-- **P2:** Profile inference and input-processing costs.
-- **P3:** Study request queues, batching policies, latency, and GPU activity.
-
-## Related Work
-
-The project was motivated by reading inference-serving and scheduling research, including Sarathi-Serve.
-
-This implementation is a small CNN serving experiment, not a reproduction of an LLM serving system.
-
-## Future Work
-
-- Add ResNet-50 (ImageNet) alongside the wafer CNN to compare policies under a more compute-intensive model. Offered load, maximum batch size, and SLO for that model are to be chosen after baseline performance measurement. Planned, not implemented.
-- Evaluate higher offered loads to investigate saturation.
-- Investigate service-time estimation error in the SLO-aware policy.
+- Connect the fixed image pool, with one shared order and arrival schedule, to the request generator.
+- Choose request rates, maximum batch size, SLO, and safety margin from the batch profile.
+- Run the Static / Adaptive wait / Adaptive immediate / SLO-aware comparison with repeats and GPU monitoring.
 
 ## Completion Status
 
-- [x] Request generator and thread-safe queue
-- [x] Static batching baselines
-- [x] Queue-aware adaptive policies
-- [x] Maximum-wait dispatch
-- [x] Four workload patterns
-- [x] Request-level timing and CSV metrics
-- [x] Warm-up
-- [x] 84-run comparison
-- [x] Separate GPU monitoring
-- [x] Nsight Systems inspection
-- [x] Graphs and result analysis
-- [x] Request deadlines, service-time calibration, and SLO-aware policy
-- [x] 96-run SLO comparison (SLO-aware failed High and Bursty)
-- [x] Separate four-policy GPU monitoring (High, one run per policy)
-- [ ] ResNet-50 extension (planned)
+- [x] Request generator, thread-safe queue, and four batching policies
+- [x] Request-level timing metrics and SLO accounting
+- [x] ResNet-50 ONNX export and real-image input verification (PyTorch / ORT CPU / C++ CUDA)
+- [x] Fixed 1,000-image ImageNet validation subset
+- [x] Per-batch service-time profile (single session)
+- [ ] Image pool connected to the generator
+- [ ] Workloads, maximum batch size, and SLO chosen for ResNet-50
+- [ ] ResNet-50 policy comparison (not started)

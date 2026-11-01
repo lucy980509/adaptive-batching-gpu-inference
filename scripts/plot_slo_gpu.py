@@ -15,8 +15,8 @@ POLICIES = [('static', 1, 'Static 1'), ('adaptive', 32, 'Adaptive wait'),
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input', type=Path, default=ROOT / 'results' / 'gpu_slo')
-    parser.add_argument('--output', type=Path, default=ROOT / 'results' / 'slo_analysis')
+    parser.add_argument('--input', type=Path, default=ROOT / 'results' / 'resnet50' / 'gpu')
+    parser.add_argument('--output', type=Path, default=ROOT / 'results' / 'resnet50' / 'analysis')
     parser.add_argument('--run', type=int, default=1)
     args = parser.parse_args()
     results = []

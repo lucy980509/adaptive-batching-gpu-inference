@@ -141,7 +141,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--output', type=Path, default=ROOT / 'results' / 'slo_comparison')
+    parser.add_argument('--output', type=Path, default=ROOT / 'results' / 'resnet50' / 'policy_comparison')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
     if args.repeats < 1:

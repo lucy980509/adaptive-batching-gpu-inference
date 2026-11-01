@@ -1,0 +1,32 @@
+{
+  "created": "2026-11-01T17:53:28",
+  "model": "resnet50 (torchvision IMAGENET1K_V2, FP32, ONNX Runtime 1.26.0 CUDA EP)",
+  "command_per_size": "p3_inference none batch_profile <N> batch_<N>.csv",
+  "batch_sizes_requested": [
+    1,
+    4,
+    8,
+    16,
+    32
+  ],
+  "batch_sizes_completed": [
+    1,
+    4,
+    8,
+    16,
+    32
+  ],
+  "failure": null,
+  "warmup_runs": 3,
+  "measured_runs": 10,
+  "inputs": "prepared ImageNet validation subset, images 0..N-1 in file order, the same images for every run of a size; the images of a smaller size are a prefix of the larger ones",
+  "service_time_definition": "batch assembly + tensor setup + session.Run; model loading, image loading and warm-up excluded; no logits copied, no per-run console output",
+  "throughput_definition": "batch_size / mean service time of back-to-back batches (observed sequential rate), not serving throughput with arriving traffic",
+  "percentile_note": "P95 of 10 runs is linearly interpolated between the two largest values and is close to the maximum",
+  "gpu_memory_note": "whole-GPU memory.used from nvidia-smi sampled about every 100 ms (WDDM, other processes included); sampled value, not an exact peak",
+  "gpu": {
+    "name": "NVIDIA GeForce GTX 1660 SUPER",
+    "driver": "561.17",
+    "memory_total": "6144 MiB"
+  }
+}
