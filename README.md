@@ -22,10 +22,10 @@ A producer thread generates requests and places them in a thread-safe queue. The
 
 ```mermaid
 flowchart TD
-    A[Request generator] --> B[Thread-safe request queue]
-    B --> C[Batching policy]
-    C --> D[ONNX Runtime with CUDA]
-    D --> E[Completion and metrics]
+    A["Generator"] --> B["Request Queue"]
+    B --> C["Batcher"]
+    C --> D["ORT / CUDA"]
+    D --> E["Metrics"]
 ```
 
 The same preprocessed image is copied into each request. This is an in-process serving simulation rather than an HTTP or gRPC service.
