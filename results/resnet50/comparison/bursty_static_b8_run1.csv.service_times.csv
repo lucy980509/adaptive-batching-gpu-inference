@@ -1,0 +1,9 @@
+batch_size,estimated_service_ms,calibration_runs,safety_margin_ms,estimator
+1,6.49,10,10,prefix_max_of_calibration_max
+2,16.1142,10,10,prefix_max_of_calibration_max
+3,16.1142,10,10,prefix_max_of_calibration_max
+4,16.1142,10,10,prefix_max_of_calibration_max
+5,18.5624,10,10,prefix_max_of_calibration_max
+6,35.2267,10,10,prefix_max_of_calibration_max
+7,35.2267,10,10,prefix_max_of_calibration_max
+8,35.2267,10,10,prefix_max_of_calibration_max

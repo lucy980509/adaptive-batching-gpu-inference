@@ -22,3 +22,6 @@ __pycache__/
 .venv-resnet/
 /models/resnet50/
 /data/
+
+# Interrupted runs set aside locally
+*.incomplete/

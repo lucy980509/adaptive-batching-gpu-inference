@@ -1,0 +1,566 @@
+{
+  "created": "2026-11-01T18:38:24",
+  "git_commit": "79dc7e80c7832cc742301991e676e25c7c95b004",
+  "git_dirty": false,
+  "git_dirty_files": [],
+  "executable": "build\\Release\\p3_inference.exe",
+  "executable_sha256": "37dbddf03b41cb41977376f68d7f824d9a7a9dfee77c4946e79171b92c368769",
+  "executable_modified": "2026-11-01T18:12:21",
+  "command": "scripts\\run_slo_experiments.py --max-batch 16 --repeats 3",
+  "plan": [
+    {
+      "workload": "high",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 1
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 1
+    },
+    {
+      "workload": "bursty",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "low",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "low",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "medium",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 1
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 1
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "medium",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "high",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 1
+    },
+    {
+      "workload": "bursty",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 1
+    },
+    {
+      "workload": "medium",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 1
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "bursty",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "low",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 1
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 1
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 1
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 1
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 1
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "high",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 1
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 2
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 2
+    },
+    {
+      "workload": "medium",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 2
+    },
+    {
+      "workload": "high",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 2
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 2
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "bursty",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 2
+    },
+    {
+      "workload": "medium",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 2
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 2
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 2
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "high",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "low",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "low",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "bursty",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "medium",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 2
+    },
+    {
+      "workload": "low",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 2
+    },
+    {
+      "workload": "bursty",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 2
+    },
+    {
+      "workload": "high",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 2
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 3
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 3
+    },
+    {
+      "workload": "medium",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 3
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 3
+    },
+    {
+      "workload": "bursty",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 3
+    },
+    {
+      "workload": "low",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 3
+    },
+    {
+      "workload": "low",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 3
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "medium",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "bursty",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 3
+    },
+    {
+      "workload": "bursty",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "bursty",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 1,
+      "repeat": 3
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 4,
+      "repeat": 3
+    },
+    {
+      "workload": "low",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 3
+    },
+    {
+      "workload": "low",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "high",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "medium",
+      "mode": "adaptive",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "high",
+      "mode": "adaptive_immediate",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "high",
+      "mode": "slo",
+      "batch_size": 16,
+      "repeat": 3
+    },
+    {
+      "workload": "medium",
+      "mode": "static",
+      "batch_size": 8,
+      "repeat": 3
+    },
+    {
+      "workload": "high",
+      "mode": "static",
+      "batch_size": 16,
+      "repeat": 3
+    }
+  ],
+  "seed": 42,
+  "repeats": 3,
+  "max_batch": 16,
+  "overrides": {},
+  "applied_common_settings": {
+    "slo_target_ms": "100",
+    "slo_required_percent": "95",
+    "safety_margin_ms": "10",
+    "duration_seconds": "10"
+  },
+  "per_workload_settings": {
+    "high": {
+      "target_rps": "250",
+      "duration_seconds": "10",
+      "burst_on_ms": "0",
+      "burst_off_ms": "0"
+    },
+    "medium": {
+      "target_rps": "100",
+      "duration_seconds": "10",
+      "burst_on_ms": "0",
+      "burst_off_ms": "0"
+    },
+    "low": {
+      "target_rps": "20",
+      "duration_seconds": "10",
+      "burst_on_ms": "0",
+      "burst_off_ms": "0"
+    },
+    "bursty": {
+      "target_rps": "250",
+      "duration_seconds": "10",
+      "burst_on_ms": "500",
+      "burst_off_ms": "1500"
+    }
+  },
+  "calibration": "warm-up 3 + 10 timed runs per batch size, estimate = prefix maximum of per-size maxima (10|prefix_max_of_calibration_max); each run calibrates sizes 1..its own max batch with the same method for every policy",
+  "python_version": "3.6.8 (tags/v3.6.8:3c6b436a57, Dec 24 2018, 00:16:47) [MSC v.1916 64 bit (AMD64)]",
+  "image_pool_size": 1000,
+  "image_order": "request id k carries image (k-1) % pool size; checked in every row and against the first run of each workload (together with the planned arrival offsets)",
+  "gpu_measurement_enabled": false,
+  "definitions": {
+    "throughput": "completed / (last finish - first actual arrival)",
+    "drain_ms": "max(0, last completion - end of the generation window)",
+    "last_completion_minus_generation_end_ms": "signed; negative = the last request finished before the window ended",
+    "slack_at_service_start_ms": "deadline - start of service - estimated service time; negative means the request was already past that point when service began, which includes queue wait; it is not by itself an estimation error",
+    "service_minus_estimate_ms": "measured service time of the batch minus its calibration estimate",
+    "generation_lag_ms": "actual arrival - planned arrival; arrivals of one run are summarized (lag, arrival gaps), not assumed identical across runs",
+    "aggregation": "per-run percentiles, then mean/SD over runs; not pooled"
+  }
+}

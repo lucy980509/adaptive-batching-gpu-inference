@@ -1,0 +1,17 @@
+batch_size,estimated_service_ms,calibration_runs,safety_margin_ms,estimator
+1,6.6079,10,10,prefix_max_of_calibration_max
+2,10.4425,10,10,prefix_max_of_calibration_max
+3,12.4994,10,10,prefix_max_of_calibration_max
+4,15.8069,10,10,prefix_max_of_calibration_max
+5,19.0556,10,10,prefix_max_of_calibration_max
+6,23.4825,10,10,prefix_max_of_calibration_max
+7,27.31,10,10,prefix_max_of_calibration_max
+8,29.9652,10,10,prefix_max_of_calibration_max
+9,33.5932,10,10,prefix_max_of_calibration_max
+10,35.2904,10,10,prefix_max_of_calibration_max
+11,41.0101,10,10,prefix_max_of_calibration_max
+12,41.7597,10,10,prefix_max_of_calibration_max
+13,45.0538,10,10,prefix_max_of_calibration_max
+14,48.4088,10,10,prefix_max_of_calibration_max
+15,51.9302,10,10,prefix_max_of_calibration_max
+16,54.6864,10,10,prefix_max_of_calibration_max

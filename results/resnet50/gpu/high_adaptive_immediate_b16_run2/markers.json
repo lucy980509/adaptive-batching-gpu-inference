@@ -1,0 +1,17 @@
+{
+  "measurement_start_host": "2026-11-01T19:29:51.740973",
+  "measurement_end_host": "2026-11-01T19:30:01.826551",
+  "inference_returncode": 0,
+  "cli_options": [
+    "--duration",
+    "10",
+    "--slo-ms",
+    "100",
+    "--margin-ms",
+    "10",
+    "--required-percent",
+    "95",
+    "--max-wait-ms",
+    "10"
+  ]
+}

@@ -26,9 +26,16 @@ def main():
     parser.add_argument('batch_size', type=int, choices=[1, 4, 8, 16, 32])
     parser.add_argument('--run', type=int, default=1)
     parser.add_argument('--output-root', type=Path, default=DEFAULT_OUTPUT_ROOT)
+    # Optional diagnostic fields polled together with utilization and memory, for example
+    # pstate,clocks.current.graphics,clocks.current.sm,clocks.current.memory,power.draw,
+    # temperature.gpu,clocks_throttle_reasons.active. Without it the recorded columns and
+    # the behavior are exactly as before. The fields only observe; no GPU setting is changed.
+    parser.add_argument('--extra-fields', default='')
     # Any other option (--duration, --slo-ms, --margin-ms, --required-percent,
     # --max-wait-ms) is passed to p3_inference unchanged and checked against the CSV.
     args, extra = parser.parse_known_args()
+    extra_fields = [f.strip() for f in args.extra_fields.split(',') if f.strip()]
+    extra_names = [f.replace('.', '_') for f in extra_fields]
 
     if not EXE.is_file():
         raise FileNotFoundError('Executable not found: ' + str(EXE))
@@ -52,12 +59,12 @@ def main():
     process = None
 
     with raw_path.open('w', newline='', encoding='utf-8') as raw_file:
-        raw_file.write('timestamp,gpu_util_percent,memory_used_mib\n')
+        raw_file.write(','.join(['timestamp', 'gpu_util_percent', 'memory_used_mib'] + extra_names) + '\n')
         raw_file.flush()
 
         monitor = subprocess.Popen(
             ['nvidia-smi', '-i', '0',
-             '--query-gpu=timestamp,utilization.gpu,memory.used',
+             '--query-gpu=' + ','.join(['timestamp', 'utilization.gpu', 'memory.used'] + extra_fields),
              '--format=csv,noheader,nounits', '-lms', '100'],
             stdout=raw_file, stderr=subprocess.PIPE,
             universal_newlines=True,
@@ -173,7 +180,7 @@ def main():
     ) as output_file:
         reader = csv.DictReader(raw_file)
         writer = csv.writer(output_file)
-        writer.writerow(['timestamp', 'phase', 'gpu_util_percent', 'memory_used_mib'])
+        writer.writerow(['timestamp', 'phase', 'gpu_util_percent', 'memory_used_mib'] + extra_names)
         for row in reader:
             timestamp = row['timestamp'].strip()
             sample_time = datetime.strptime(timestamp, '%Y/%m/%d %H:%M:%S.%f')
@@ -185,7 +192,8 @@ def main():
                 phase = 'shutdown'
             utilization = row['gpu_util_percent'].strip()
             memory = row['memory_used_mib'].strip()
-            writer.writerow([timestamp, phase, utilization, memory])
+            writer.writerow([timestamp, phase, utilization, memory] + [
+                (row[n] or '').strip() for n in extra_names])
             if phase == 'measurement':
                 try:
                     value = float(utilization)
@@ -231,6 +239,7 @@ def main():
                          'MEASURE_END markers; model loading, warm-up and calibration are '
                          'labelled initialization_or_warmup in gpu_samples.csv and excluded',
         'cli_options': extra,
+        'extra_gpu_fields': extra_fields,
         'max_wait_ms_passed': passed_wait,
         'max_wait_ms_semantics': 'recorded value is what the policy applied: Adaptive wait = the wait in use, Adaptive immediate = 0 (never waits), Static and SLO-aware = not applicable (null)',
         'git_commit': git('rev-parse', 'HEAD'),
