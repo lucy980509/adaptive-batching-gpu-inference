@@ -93,6 +93,14 @@ def main():
                 monitor.terminate()
             _, monitor_error = monitor.communicate()
 
+    # Saved before any validation: if a later check fails, the measurement window can
+    # still be recovered from this file and the raw files.
+    (output_dir / 'markers.json').write_text(json.dumps({
+        'measurement_start_host': measure_start.isoformat() if measure_start else None,
+        'measurement_end_host': measure_end.isoformat() if measure_end else None,
+        'inference_returncode': inference_returncode,
+        'cli_options': extra}, indent=2), encoding='utf-8')
+
     if monitor_error:
         print('GPU monitor message:', monitor_error)
     if inference_returncode != 0:
@@ -112,16 +120,36 @@ def main():
                 'slo_target_ms', 'safety_margin_ms', 'slo_required_percent',
                 'target_rps', 'duration_seconds', 'max_wait_ms')):
             raise RuntimeError('Settings change inside one run')
+    # Options are passed to every policy, but only some policies use them.
+    # --max-wait-ms: only Adaptive wait uses it (recorded as the value in use).
+    # Adaptive immediate never waits (recorded as 0), Static and SLO-aware do not
+    # use a maximum wait (recorded blank). So the recorded value is checked against
+    # what the policy really applies, and the option is compared only for Adaptive wait.
+    recorded_wait = requests[0]['max_wait_ms']
+    passed_wait = None
+    for index in range(0, len(extra) - 1, 2):
+        if extra[index] == '--max-wait-ms':
+            passed_wait = float(extra[index + 1])
+    if args.mode == 'adaptive_immediate':
+        if recorded_wait != '0':
+            raise RuntimeError('Adaptive immediate must record max_wait_ms=0, found ' + repr(recorded_wait))
+    elif args.mode == 'adaptive':
+        if recorded_wait == '' or (passed_wait is not None and float(recorded_wait) != passed_wait):
+            raise RuntimeError('Adaptive wait recorded max_wait_ms={!r}, passed {}'.format(
+                recorded_wait, passed_wait))
+    elif recorded_wait != '':
+        raise RuntimeError('{} does not use a maximum wait but recorded {!r}'.format(
+            args.mode, recorded_wait))
+
+    # The remaining options apply to every policy and must equal the recorded value.
     override_columns = {'--duration': 'duration_seconds', '--slo-ms': 'slo_target_ms',
                         '--margin-ms': 'safety_margin_ms',
-                        '--required-percent': 'slo_required_percent',
-                        '--max-wait-ms': 'max_wait_ms'}
+                        '--required-percent': 'slo_required_percent'}
     for index in range(0, len(extra) - 1, 2):
         column = override_columns.get(extra[index])
-        recorded = requests[0][column] if column else None
-        if column and recorded != '' and float(recorded) != float(extra[index + 1]):
+        if column and float(requests[0][column]) != float(extra[index + 1]):
             raise RuntimeError('CSV {}={} differs from {} {}'.format(
-                column, recorded, extra[index], extra[index + 1]))
+                column, requests[0][column], extra[index], extra[index + 1]))
 
     # Every generated request must complete exactly once, in the planned image order.
     images = int(json.loads(MANIFEST.read_text(encoding='utf-8'))['selection']['count'])
@@ -203,6 +231,8 @@ def main():
                          'MEASURE_END markers; model loading, warm-up and calibration are '
                          'labelled initialization_or_warmup in gpu_samples.csv and excluded',
         'cli_options': extra,
+        'max_wait_ms_passed': passed_wait,
+        'max_wait_ms_semantics': 'recorded value is what the policy applied: Adaptive wait = the wait in use, Adaptive immediate = 0 (never waits), Static and SLO-aware = not applicable (null)',
         'git_commit': git('rev-parse', 'HEAD'),
         'git_dirty': bool(git('status', '--porcelain', '--untracked-files=no')),
         'executable_sha256': hashlib.sha256(EXE.read_bytes()).hexdigest(),

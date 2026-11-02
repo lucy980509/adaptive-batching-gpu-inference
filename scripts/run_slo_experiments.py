@@ -395,7 +395,16 @@ def main():
                                    cwd=str(ROOT), stdout=log, stderr=subprocess.STDOUT,
                                    check=True, timeout=900)
                 summary, settings, run_plan = summarize(csv_path, workload, mode, size, images)
+                # max_wait_ms is recorded as what the policy applies: the wait in use for
+                # Adaptive wait, 0 for Adaptive immediate, blank for Static and SLO-aware.
+                wait = settings['max_wait_ms']
+                if (mode == 'adaptive' and wait == '') or \
+                        (mode == 'adaptive_immediate' and wait != '0') or \
+                        (mode in ('static', 'slo') and wait != ''):
+                    raise ValueError('Unexpected max_wait_ms {!r} for {}'.format(wait, mode))
                 for key, value in overrides.items():
+                    if key == 'max_wait_ms' and mode != 'adaptive':
+                        continue
                     if settings[key] != '' and float(settings[key]) != value:
                         raise ValueError('CSV {}={} differs from the override {}'.format(
                             key, settings[key], value))
