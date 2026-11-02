@@ -3,7 +3,7 @@
 Run with the dedicated environment, from the repository root, after building p3_inference:
     .venv-resnet\\Scripts\\python.exe scripts\\verify_resnet_inputs.py
 
-Checks (nothing is downloaded; cached files are reused):
+Checks (cached files are reused; only the small classes.py is downloaded if it is missing):
  1. Subset file: size, SHA-256, seed/selection reproduce, CSV matches manifest.
  2. Label mapping: the synset in each image's file name equals the synset the dataset's
     class list assigns to its label id; the class list is unique and sorted (the same
@@ -57,10 +57,34 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def cached(filename, revision):
-    return Path(hf_hub_download(
-        REPO_ID, filename, repo_type='dataset', revision=revision,
-        cache_dir=str(CACHE), local_files_only=True))
+def cached(filename, revision, download=False):
+    """Path of a file of the pinned dataset revision in the local Hugging Face cache.
+
+    The cache is used when the file is there. With download=True a missing file is
+    fetched once, from the same dataset, revision and cache folder that
+    prepare_imagenet_subset.py uses; this is meant for small metadata files only
+    (classes.py). The validation files are never downloaded here.
+    """
+    options = dict(repo_type='dataset', revision=revision, cache_dir=str(CACHE))
+    try:
+        return Path(hf_hub_download(REPO_ID, filename, local_files_only=True, **options))
+    except Exception:
+        if not download:
+            raise SystemExit(
+                '{} is not in the local cache {}. Run scripts/prepare_imagenet_subset.py '
+                'and keep its cache folder until this verification is done.'.format(filename, CACHE))
+    print('{} is not cached; downloading this small file once from {} (revision {}).'.format(
+        filename, REPO_ID, revision[:7]))
+    try:
+        return Path(hf_hub_download(REPO_ID, filename, **options))
+    except Exception as error:
+        raise SystemExit(
+            'Could not download {} ({}: {}).\nIt is needed to check the label mapping. '
+            'Accept the dataset terms at https://huggingface.co/datasets/{} and log in with '
+            '"hf auth login" (the token stays local), or place the file yourself at\n{}\n'
+            'then run this script again.'.format(
+                filename, type(error).__name__, error, REPO_ID,
+                CACHE / 'datasets--ILSVRC--imagenet-1k' / 'snapshots' / revision / filename))
 
 
 def compare(name, actual, expected):
@@ -149,7 +173,7 @@ def main():
     report['checks']['subset_file'] = subset
 
     # 2. explicit synset mapping
-    classes_text = cached('classes.py', revision).read_text(encoding='utf-8')
+    classes_text = cached('classes.py', revision, download=True).read_text(encoding='utf-8')
     pairs = re.findall(r'"(n\d{8})":\s*"([^"]*)"', classes_text)
     wnids = [w for w, _ in pairs]
     names = [n for _, n in pairs]

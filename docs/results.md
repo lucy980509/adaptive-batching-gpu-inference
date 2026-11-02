@@ -48,7 +48,7 @@ Charts: [SLO attainment](../results/resnet50/analysis/slo_attainment.png), [P95 
 
 Only Adaptive wait and Adaptive immediate met the requirement in every one of their 12 runs. That is a statement about these four workloads and this SLO, not a ranking: the policies that meet the requirement still differ in latency (see the tables below), and Static 4 and Static 8 have lower P95 than the adaptive policies at High and Bursty load.
 
-### 3.2 Low (20 req/s): immediate service is enough
+### 3.2 Low (20 req/s)
 
 | Policy | SLO attainment % (mean ± SD) | Runs meeting | P50 ms | P95 ms (± SD) | P99 ms | Throughput req/s | Mean queue wait ms | Mean batch |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -60,7 +60,7 @@ Only Adaptive wait and Adaptive immediate met the requirement in every one of th
 | Adaptive immediate 16 | 100.0 ± 0.0 | 3/3 | 16.3 | 23.1 ± 0.1 | 26.1 | 20.0 | 0.3 | 1.00 |
 | SLO-aware 16 | 63.0 ± 1.3 | 0/3 | 82.3 | 119.4 ± 0.6 | 125.1 | 19.9 | 52.9 | 2.00 |
 
-Requests arrive every 50 ms, so waiting for a batch to fill only adds delay. Static 1 and Adaptive immediate dispatch at once (mean batch 1.0, queue wait about 0.3 ms) and have P95 of 22.6 and 23.1 ms. Adaptive wait also meets the SLO but holds each request for up to its 10 ms maximum wait (P95 38.7 ms). Large fixed batches are expensive here: Static 4 / 8 / 16 wait for 4 / 8 / 16 arrivals, with mean queue waits of 75, 176 and 369 ms and attainment of 40%, 16% and 5%; none of their 9 runs passed. The SLO-aware policy also failed all 3 runs (section 3.6).
+Requests arrive every 50 ms. Static 1 and Adaptive immediate dispatch at once (mean batch 1.0, queue wait about 0.3 ms) and had the lowest mean P95 of the seven settings (22.6 and 23.1 ms). Adaptive wait also meets the SLO but holds each request for up to its 10 ms maximum wait (P95 38.7 ms). Waiting for a batch to fill added delay in these runs: Static 4 / 8 / 16 wait for 4 / 8 / 16 arrivals, with mean queue waits of 75, 176 and 369 ms and attainment of 40%, 16% and 5%; none of their 9 runs passed. The SLO-aware policy also failed all 3 runs (section 3.6).
 
 ### 3.3 Medium (100 req/s)
 
@@ -74,9 +74,9 @@ Requests arrive every 50 ms, so waiting for a batch to fill only adds delay. Sta
 | Adaptive immediate 16 | 100.0 ± 0.0 | 3/3 | 5.5 | 10.7 ± 0.1 | 11.3 | 100.0 | 2.1 | 1.00 |
 | SLO-aware 16 | 100.0 ± 0.0 | 3/3 | 32.4 | 49.7 ± 0.2 | 53.3 | 99.8 | 15.4 | 4.00 |
 
-Static 1 and Adaptive immediate again have the lowest latency (P95 about 10.8 ms). A batch of 4 fills in about 30-40 ms at this rate, so Static 4 and the SLO-aware policy (mean batch 4.0) pass with P95 near 50 ms. Static 8 misses the requirement (91.8% attainment, 0/3) and Static 16 misses it clearly (30.0%). Adaptive wait passes with the largest run-to-run spread of the passing policies (P95 74.3 ± 6.4 ms).
+Static 1 and Adaptive immediate again had the lowest mean P95 (about 10.8 ms). A batch of 4 fills in about 30-40 ms at this rate, so Static 4 and the SLO-aware policy (mean batch 4.0) pass with P95 near 50 ms. Static 8 misses the requirement (91.8% attainment, 0/3) and Static 16 misses it clearly (30.0%). Adaptive wait passes with the largest run-to-run spread of the passing policies (P95 74.3 ± 6.4 ms).
 
-### 3.4 High (250 req/s): Static 1 is overloaded, batching helps
+### 3.4 High (250 req/s): Static 1 is overloaded
 
 | Policy | SLO attainment % (mean ± SD) | Runs meeting | P50 ms | P95 ms (± SD) | P99 ms | Throughput req/s | Mean queue wait ms | Mean batch |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -88,7 +88,7 @@ Static 1 and Adaptive immediate again have the lowest latency (P95 about 10.8 ms
 | Adaptive immediate 16 | 100.0 ± 0.0 | 3/3 | 58.8 | 82.8 ± 1.7 | 88.5 | 247.8 | 28.8 | 7.68 |
 | SLO-aware 16 | 98.9 ± 0.8 | 3/3 | 67.0 | 89.2 ± 0.8 | 101.3 | 248.5 | 24.8 | 11.31 |
 
-Static 1 cannot keep up: it completed 189 req/s while 250 req/s arrived, a backlog built, mean queue wait reached 1,586 ms, P95 3,044 ms, attainment 2.5%, and after generation ended it needed 3.2 s more to drain (3 runs: 3,385 / 3,163 / 3,086 ms). Every policy that batches keeps up (about 248-249 req/s) and passes, except Static 16: filling 16 requests takes about 60 ms at this rate and a batch of 16 then needs about 53 ms of service, so only 74.4% of requests meet 100 ms.
+Static 1 cannot keep up: it completed 189 req/s while 250 req/s arrived, a backlog built, mean queue wait reached 1,586 ms, P95 3,044 ms, attainment 2.5%, and after generation ended it needed 3.2 s more to drain (3 runs: 3,385 / 3,163 / 3,086 ms). The batching settings completed about 248-249 req/s, and all of them passed except Static 16: filling 16 requests takes about 60 ms at this rate and a batch of 16 then needs about 53 ms of service, so only 74.4% of requests meet 100 ms.
 
 Static 4 and Static 8 gave good results here: all their runs passed and their P95 (55.6 and 61.4 ms) is lower than that of Adaptive wait, Adaptive immediate and SLO-aware (80.6, 82.8, 89.2 ms). The adaptive policies form larger batches (mean 7.7-11.3) than Static 4 (mean 4.0) and have higher P95; the data do not isolate why. Static 4 had the largest spread: its three runs had P95 of 98.0 / 36.3 / 32.5 ms (attainment 97.0 / 100.0 / 100.0%), so its mean P95 should not be read as precise. A fixed size tuned to this load is not robust to other loads: Static 4 and 8 fail at Low (and Static 8 at Medium).
 
